@@ -1,5 +1,5 @@
 """Slop generator: rule-based and model-based sloppification."""
 
-from .rule_sloppifier import RuleSloppifier, sloppify
+from .rule_sloppifier import RuleSloppifier, sloppify, sloppify_with_labels
 
-__all__ = ["RuleSloppifier", "sloppify"]
+__all__ = ["RuleSloppifier", "sloppify", "sloppify_with_labels"]
