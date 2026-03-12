@@ -39,3 +39,12 @@ data:
   text_column: text
   label_column: labels
   max_samples: null
+  curriculum_enabled: true
+  difficulty_column: difficulty
+  curriculum_early_epoch_ratio: 0.5
+  curriculum_early_easy: 0.8
+  curriculum_early_medium: 0.2
+  curriculum_early_hard: 0.0
+  curriculum_late_easy: 0.2
+  curriculum_late_medium: 0.4
+  curriculum_late_hard: 0.4

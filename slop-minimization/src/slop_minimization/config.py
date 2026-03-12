@@ -59,6 +59,16 @@ class DataConfig:
     text_column: str = "text"
     label_column: str = "labels"  # per-token labels
     max_samples: int | None = None
+    # Curriculum training: mix of easy/medium/hard negatives by epoch
+    curriculum_enabled: bool = False
+    difficulty_column: str = "difficulty"
+    curriculum_early_epoch_ratio: float = 0.5  # first N% of epochs use early mix
+    curriculum_early_easy: float = 0.8
+    curriculum_early_medium: float = 0.2
+    curriculum_early_hard: float = 0.0
+    curriculum_late_easy: float = 0.2
+    curriculum_late_medium: float = 0.4
+    curriculum_late_hard: float = 0.4
 
 
 @dataclass

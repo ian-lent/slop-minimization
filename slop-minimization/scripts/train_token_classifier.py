@@ -8,7 +8,7 @@ import random
 from pathlib import Path
 
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
 from datasets import Dataset
 
 import sys
@@ -83,7 +83,6 @@ def train_one_epoch(
     return total_loss / max(len(loader), 1)
 
 
-@torch.no_grad()
 @torch.no_grad()
 def evaluate(model, loader, device, compute_token_auroc=True):
     model.eval()
@@ -179,6 +178,11 @@ def main() -> None:
         collate_fn=collate_fn,
         num_workers=0,
     )
+    if getattr(cfg_data, "curriculum_enabled", False) and getattr(cfg_data, "difficulty_column", ""):
+        diff_col = getattr(cfg_data, "difficulty_column", "difficulty")
+        train_difficulties = [ex.get(diff_col, "easy") for ex in train_data]
+    else:
+        train_difficulties = None
     val_loader = DataLoader(
         tokenized_val,
         batch_size=int(cfg_train.batch_size),
@@ -200,9 +204,21 @@ def main() -> None:
     patience_counter = 0
 
     for epoch in range(int(cfg_train.num_epochs)):
+        epoch_loader = train_loader
+        if train_difficulties is not None:
+            n_epochs = int(cfg_train.num_epochs)
+            early_ratio = getattr(cfg_data, "curriculum_early_epoch_ratio", 0.5)
+            n_early = max(1, int(n_epochs * early_ratio))
+            if epoch < n_early:
+                w_e, w_m, w_h = getattr(cfg_data, "curriculum_early_easy", 0.8), getattr(cfg_data, "curriculum_early_medium", 0.2), getattr(cfg_data, "curriculum_early_hard", 0.0)
+            else:
+                w_e, w_m, w_h = getattr(cfg_data, "curriculum_late_easy", 0.2), getattr(cfg_data, "curriculum_late_medium", 0.4), getattr(cfg_data, "curriculum_late_hard", 0.4)
+            wmap = {"easy": w_e, "medium": w_m, "hard": w_h}
+            weights = [wmap.get(d, 1.0) for d in train_difficulties]
+            epoch_loader = DataLoader(tokenized_train, batch_size=int(cfg_train.batch_size), shuffle=False, sampler=WeightedRandomSampler(weights, num_samples=len(weights)), collate_fn=collate_fn, num_workers=0)
         train_loss = train_one_epoch(
             model,
-            train_loader,
+            epoch_loader,
             optimizer,
             scaler,
             device,

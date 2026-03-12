@@ -6,6 +6,42 @@ import random
 import re
 from typing import List, Tuple
 
+# Difficulty presets for curriculum: easy (obvious), medium (lower probs), hard (subtle only)
+DIFFICULTY_PRESETS: dict[str, dict] = {
+    "easy": {
+        "filler_prob": 0.25,
+        "hedge_prob": 0.2,
+        "repeat_sentence_prob": 0.15,
+        "generic_noun_prob": 0.3,
+        "template_prob": 0.2,
+        "use_only_subtle": False,
+    },
+    "medium": {
+        "filler_prob": 0.12,
+        "hedge_prob": 0.1,
+        "repeat_sentence_prob": 0.08,
+        "generic_noun_prob": 0.15,
+        "template_prob": 0.1,
+        "use_only_subtle": False,
+    },
+    "hard": {
+        "filler_prob": 0.0,
+        "hedge_prob": 0.12,
+        "repeat_sentence_prob": 0.0,
+        "generic_noun_prob": 0.2,
+        "template_prob": 0.0,
+        "use_only_subtle": True,
+    },
+}
+
+# Natural vague phrases (harder to detect, more realistic)
+NATURAL_VAGUE_PHRASES_WORDS: List[List[str]] = [
+    ["in", "practice"], ["in", "general"], ["in", "many", "cases"],
+    ["to", "some", "extent"], ["in", "some", "sense"], ["to", "a", "degree"],
+    ["by", "and", "large"], ["for", "the", "most", "part"], ["in", "principle"],
+]
+NATURAL_VAGUE_PHRASES = [" " + " ".join(p) for p in NATURAL_VAGUE_PHRASES_WORDS]
+
 # Filler phrases to inject (with optional leading space for insertion)
 # Word-list form for label tracking (sloppify_with_labels)
 FILLER_PHRASES_WORDS: List[List[str]] = [
@@ -94,6 +130,7 @@ class RuleSloppifier:
         repeat_sentence_prob: float = 0.15,
         generic_noun_prob: float = 0.3,
         template_prob: float = 0.2,
+        use_only_subtle: bool = False,
         seed: int | None = None,
     ):
         self.filler_prob = filler_prob
@@ -101,7 +138,15 @@ class RuleSloppifier:
         self.repeat_sentence_prob = repeat_sentence_prob
         self.generic_noun_prob = generic_noun_prob
         self.template_prob = template_prob
+        self.use_only_subtle = use_only_subtle
         self._rng = random.Random(seed)
+
+    @classmethod
+    def from_difficulty(cls, difficulty: str, seed: int | None = None) -> "RuleSloppifier":
+        """Create a sloppifier from a curriculum difficulty preset: easy, medium, hard."""
+        preset = DIFFICULTY_PRESETS.get(difficulty, DIFFICULTY_PRESETS["easy"]).copy()
+        use_only_subtle = preset.pop("use_only_subtle", False)
+        return cls(use_only_subtle=use_only_subtle, seed=seed, **preset)
 
     def _inject_fillers(self, text: str) -> str:
         words = text.split()
@@ -199,6 +244,19 @@ class RuleSloppifier:
                     out.append((pw, 1))
         return out
 
+    def _inject_natural_vague_tokens(self, tokens: List[Tuple[str, int]]) -> List[Tuple[str, int]]:
+        """Inject natural vague phrases (hard difficulty)."""
+        if len(tokens) < 3:
+            return tokens
+        out: List[Tuple[str, int]] = []
+        for i, (w, l) in enumerate(tokens):
+            if i < len(tokens) - 1 and self._rng.random() < 0.15:
+                phrase = self._rng.choice(NATURAL_VAGUE_PHRASES_WORDS)
+                for pw in phrase:
+                    out.append((pw, 1))
+            out.append((w, l))
+        return out
+
     def _add_hedging_tokens(self, tokens: List[Tuple[str, int]]) -> List[Tuple[str, int]]:
         if not tokens:
             return tokens
@@ -262,17 +320,25 @@ class RuleSloppifier:
     def sloppify_with_labels(self, text: str) -> Tuple[str, List[int]]:
         """Apply rules and return (text, labels) with labels aligned to whitespace-tokenized words.
         Label 1 = slop (filler, hedge, repeated, generic replacement, template); 0 = clean.
+        When use_only_subtle is True, only hedging, generic nouns, and natural vague phrases are used.
         """
         if not text or not text.strip():
             return text.strip(), []
         tokens: List[Tuple[str, int]] = [(w, 0) for w in text.strip().split()]
-        ops = [
-            self._inject_fillers_tokens,
-            self._add_hedging_tokens,
-            self._repeat_sentence_tokens,
-            self._lower_specificity_tokens,
-            self._add_template_tokens,
-        ]
+        if self.use_only_subtle:
+            ops = [
+                self._inject_natural_vague_tokens,
+                self._add_hedging_tokens,
+                self._lower_specificity_tokens,
+            ]
+        else:
+            ops = [
+                self._inject_fillers_tokens,
+                self._add_hedging_tokens,
+                self._repeat_sentence_tokens,
+                self._lower_specificity_tokens,
+                self._add_template_tokens,
+            ]
         self._rng.shuffle(ops)
         for op in ops:
             tokens = op(tokens)

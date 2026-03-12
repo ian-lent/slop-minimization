@@ -212,20 +212,26 @@ def build_examples(
     min_words: int = 3,
     sloppifier_kw: dict | None = None,
 ) -> list[dict]:
-    """Build list of {"text": str, "labels": list[int]} with clean and slop examples."""
+    """Build list of {"text": str, "labels": list[int], "difficulty": str} with clean and slop examples."""
     sloppifier_kw = sloppifier_kw or {}
     rng = random.Random(seed)
+    easy_ratio = sloppifier_kw.pop("easy_ratio", 0.5)
+    medium_ratio = sloppifier_kw.pop("medium_ratio", 0.3)
+    hard_ratio = sloppifier_kw.pop("hard_ratio", 0.2)
     examples = []
     for sent in clean_sentences:
         words = sent.split()
         if len(words) < min_words:
             continue
-        examples.append({"text": sent, "labels": [0] * len(words)})
-        s = RuleSloppifier(seed=rng.randint(0, 2**31 - 1), **sloppifier_kw)
+        examples.append({"text": sent, "labels": [0] * len(words), "difficulty": "easy"})
+        total_r = easy_ratio + medium_ratio + hard_ratio
+        weights = [easy_ratio, medium_ratio, hard_ratio] if total_r > 0 else [1, 0, 0]
         for _ in range(slop_per_text):
+            d = rng.choices(["easy", "medium", "hard"], weights=weights)[0]
+            s = RuleSloppifier.from_difficulty(d, seed=rng.randint(0, 2**31 - 1))
             text, labels = s.sloppify_with_labels(sent)
             if len(text.split()) >= min_words and any(labels):
-                examples.append({"text": text, "labels": labels})
+                examples.append({"text": text, "labels": labels, "difficulty": d})
     return examples
 
 
@@ -265,6 +271,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--repeat-prob", type=float, default=0.15)
     p.add_argument("--generic-noun-prob", type=float, default=0.3)
     p.add_argument("--template-prob", type=float, default=0.2)
+    p.add_argument("--easy-ratio", type=float, default=0.5, help="Fraction of slop examples that are easy (curriculum)")
+    p.add_argument("--medium-ratio", type=float, default=0.3, help="Fraction of slop examples that are medium")
+    p.add_argument("--hard-ratio", type=float, default=0.2, help="Fraction of slop examples that are hard")
     return p.parse_args()
 
 
@@ -286,6 +295,9 @@ def main() -> None:
         "repeat_sentence_prob": args.repeat_prob,
         "generic_noun_prob": args.generic_noun_prob,
         "template_prob": args.template_prob,
+        "easy_ratio": args.easy_ratio,
+        "medium_ratio": args.medium_ratio,
+        "hard_ratio": args.hard_ratio,
     }
     examples = build_examples(
         clean,
