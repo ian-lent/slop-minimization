@@ -124,6 +124,8 @@ def run_hill_climbing(
     all_candidates: list[dict[str, Any]] = []
     invalid_generations: list[dict[str, Any]] = []
     iteration_found: dict[str, int] = {}  # prompt_text -> first iteration where seen
+    best_initial_prompt_text: str = ""
+    best_initial_reward: float = -1.0
 
     out_path = None
     if output_dir:
@@ -175,6 +177,9 @@ def run_hill_climbing(
         # Sort by reward descending (higher = better)
         scores.sort(key=lambda x: x[0], reverse=True)
         top = [s[1] for s in scores[: config.top_k]]
+        if iteration == 0 and top:
+            best_initial_prompt_text = top[0]["prompt_text"]
+            best_initial_reward = top[0]["avg_reward"]
         top_specs = [dict_to_prompt_spec(s["prompt_spec"]) for s in top]
 
         # New population: top_k specs + their mutated children + optional random explore
@@ -197,6 +202,12 @@ def run_hill_climbing(
         if key not in by_prompt or c["avg_reward"] > by_prompt[key]["avg_reward"]:
             by_prompt[key] = c
     leaderboard = sorted(by_prompt.values(), key=lambda x: x["avg_reward"], reverse=True)
+
+    # One example generation from the best prompt
+    best_prompt_text = leaderboard[0]["prompt_text"] if leaderboard else ""
+    example_generation = ""
+    if best_prompt_text:
+        example_generation = generator.generate_one(best_prompt_text)
 
     if out_path:
         with open(out_path / "leaderboard.jsonl", "w") as f:
@@ -237,6 +248,9 @@ def run_hill_climbing(
         "leaderboard": leaderboard,
         "best_prompt_text": leaderboard[0]["prompt_text"] if leaderboard else "",
         "best_avg_reward": leaderboard[0]["avg_reward"] if leaderboard else -1.0,
+        "best_initial_prompt_text": best_initial_prompt_text,
+        "best_initial_reward": best_initial_reward,
+        "example_generation": example_generation,
         "output_dir": str(out_path) if out_path else None,
         "invalid_count": len(invalid_generations),
     }

@@ -8,7 +8,7 @@ reward:
   device: null
   batch_size: 16
 
-# Generator (frozen causal LM)
+# Generator (frozen causal LM) - small model for Colab
 generator:
   model_name: gpt2
   temperature: 0.8
@@ -18,12 +18,12 @@ generator:
   device: null
   batch_size: 4
 
-# Search
+# Search (small default budget for quick validation)
 search:
-  population_size: 12
-  top_k: 4
+  population_size: 6
+  top_k: 2
   children_per_parent: 2
-  num_iterations: 10
+  num_iterations: 3
   samples_per_prompt: 2
   mutation_strength: medium
   random_seed: 42
@@ -31,6 +31,6 @@ search:
   keep_random_explore: 1
 
 # Task / topic (default seed instruction)
-default_task: "Explain the causes of climate change in 2-3 short paragraphs."
+default_task: "Explain inflation clearly to a college student."
 
 output_dir: outputs/prompt_opt

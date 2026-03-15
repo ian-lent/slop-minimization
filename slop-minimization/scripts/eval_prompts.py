@@ -74,9 +74,10 @@ def main() -> None:
         n_samples=args.n_samples,
     )
     print("Task:", task)
-    print(f"Seed mean reward:    {result['seed_mean_reward']:.4f}")
+    print(f"Seed mean reward:     {result['seed_mean_reward']:.4f}")
     print(f"Optimized mean reward: {result['optimized_mean_reward']:.4f}")
-    print(f"Improvement: {result['optimized_mean_reward'] - result['seed_mean_reward']:.4f}")
+    delta = result["optimized_mean_reward"] - result["seed_mean_reward"]
+    print(f"Delta (optimized - seed): {delta:+.4f}")
     out_path = run_dir / "eval_seed_vs_optimized.json"
     with open(out_path, "w") as f:
         json.dump(result, f, indent=2)

@@ -18,8 +18,8 @@ from slop_minimization.prompt_opt import (
     run_hill_climbing,
     HillClimbConfig,
     get_seeds_for_task,
+    compare_seed_vs_optimized,
 )
-from slop_minimization.prompt_opt.templates import PromptSpec
 
 
 def parse_args() -> argparse.Namespace:
@@ -92,11 +92,53 @@ def main() -> None:
         config=hill_config,
         output_dir=run_dir,
     )
-    print("\nTop 3 prompts by reward:")
-    for i, row in enumerate(result["leaderboard"][:3], 1):
-        print(f"\n--- {i}. avg_reward={row['avg_reward']:.4f} ---")
-        print(row["prompt_text"][:600])
-    print(f"\nBest reward: {result['best_avg_reward']:.4f}")
+
+    print("\n" + "=" * 60)
+    print("BEST INITIAL SEED PROMPT (iteration 0)")
+    print("=" * 60)
+    print(result.get("best_initial_prompt_text", "")[:800])
+    print(f"\n[Initial best reward: {result.get('best_initial_reward', -1):.4f}]")
+
+    print("\n" + "=" * 60)
+    print("BEST FINAL OPTIMIZED PROMPT")
+    print("=" * 60)
+    print(result.get("best_prompt_text", "")[:800])
+    print(f"\n[Best final reward: {result['best_avg_reward']:.4f}]")
+
+    print("\n" + "=" * 60)
+    print("ONE EXAMPLE GENERATION FROM BEST PROMPT")
+    print("=" * 60)
+    print(result.get("example_generation", "(none)")[:600])
+
+    print("\n" + "=" * 60)
+    print("EVAL: SEED VS OPTIMIZED (same task, n_samples=5)")
+    print("=" * 60)
+    import random
+    eval_result = compare_seed_vs_optimized(
+        task_instruction=task,
+        generator=generator,
+        reward_model=reward_model,
+        optimized_prompt_text=result.get("best_prompt_text", ""),
+        n_samples=5,
+        min_length=hill_config.min_output_length,
+        rng=random.Random(hill_config.random_seed + 1),
+    )
+    seed_mean = eval_result["seed_mean_reward"]
+    opt_mean = eval_result["optimized_mean_reward"]
+    delta = opt_mean - seed_mean
+    print(f"Seed mean reward:     {seed_mean:.4f}")
+    print(f"Optimized mean reward: {opt_mean:.4f}")
+    print(f"Delta (optimized - seed): {delta:+.4f}")
+
+    print("\n" + "=" * 60)
+    print("SUMMARY")
+    print("=" * 60)
+    if delta > 0.01:
+        print("Optimized prompts improved over seeds (higher reward = less slop).")
+    elif delta < -0.01:
+        print("Seeds scored higher than the optimized prompt on this eval; try more iterations or a larger population.")
+    else:
+        print("Seed and optimized rewards are similar; run longer or with more samples to see a clearer difference.")
     print(f"Results saved to {result['output_dir']}")
     if result.get("invalid_count"):
         print(f"Invalid (too short) generations: {result['invalid_count']}")
