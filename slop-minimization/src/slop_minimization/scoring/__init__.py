@@ -1,0 +1,13 @@
+"""Scoring and reward model for slop classifier."""
+
+from .aggregation import aggregate_token_scores, compute_reward
+from .reward import RewardConfig, SlopRewardModel
+from .diagnostics import compute_diagnostics
+
+__all__ = [
+    "aggregate_token_scores",
+    "compute_reward",
+    "RewardConfig",
+    "SlopRewardModel",
+    "compute_diagnostics",
+]
