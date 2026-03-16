@@ -114,12 +114,19 @@ def main() -> None:
         base_reward = row.get("avg_base_reward", avg_reward)
         struct_penalty = row.get("structural_penalty_contribution", row.get("avg_structural_penalty", 0.0))
         semantic_penalty = row.get("semantic_penalty_contribution", row.get("avg_semantic_penalty", 0.0))
+        quality_reward = row.get("quality_reward_contribution", row.get("avg_quality_score", 0.0))
         struct_diag = row.get("structural_diagnostics", {})
         semantic_diag = row.get("semantic_diagnostics", {})
+        quality_diag = row.get("quality_diagnostics", {})
+        provenance = row.get("provenance", "unknown")
         sample = sample_outputs.get(prompt_text, "(no sample in generations.jsonl)")
 
         print("=" * 72)
-        print(f"#{i}  Total: {avg_reward:.4f}  |  Base: {base_reward:.4f}  |  Struct: -{struct_penalty:.4f}  |  Semantic: -{semantic_penalty:.4f}")
+        print(
+            f"#{i}  Total: {avg_reward:.4f}  |  Base: {base_reward:.4f}"
+            f"  |  Struct: -{struct_penalty:.4f}  |  Semantic: -{semantic_penalty:.4f}  |  Quality: +{quality_reward:.4f}"
+            f"  |  Source: {provenance}"
+        )
         print("=" * 72)
         print("PROMPT:")
         print(prompt_text[:700] + ("..." if len(prompt_text) > 700 else ""))
@@ -138,6 +145,13 @@ def main() -> None:
                 print(f"  {k}: {v:.3f}  {bar}")
         else:
             print("  (none)")
+        print("QUALITY (higher = more useful; bounded heuristics):")
+        if quality_diag:
+            for k, v in sorted(quality_diag.items()):
+                bar = "█" * int(round(v * 10)) + "░" * (10 - int(round(v * 10)))
+                print(f"  {k}: {v:.3f}  {bar}")
+        else:
+            print("  (none)")
         print()
         print("ONE SAMPLE OUTPUT:")
         print(sample[:500] + ("..." if len(sample) > 500 else ""))
@@ -148,8 +162,9 @@ def main() -> None:
     print("=" * 72)
     print("Base = content/clarity. Structural penalty = list/bullet/formatting. Semantic penalty =")
     print("instruction echo, writing advice, prompt copy, off-task. task_relevance_score high = on-task.")
-    print("Total reward = base - structural - semantic; high total with low semantic penalty and high")
-    print("task_relevance = winning on real clarity rather than meta/format artifacts.")
+    print("Total reward = base - structural - semantic + quality.")
+    print("High total with low semantic penalty, low structural artifacts, and strong quality scores is")
+    print("more likely to reflect real clarity rather than meta/format reward hacking.")
     print()
 
 

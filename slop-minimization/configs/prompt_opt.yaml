@@ -48,6 +48,20 @@ search:
   # Semantic penalty: meta-instructional, writing-advice, off-task (default task_keywords derived from default_task)
   lambda_semantic: 0.12
   task_keywords: []  # e.g. [inflation, prices, economy]; empty => derive from task instruction
+  # Quality reward: modest positive signal for useful outputs (kept small to avoid dominating reward)
+  lambda_quality: 0.10
+  quality_weights:
+    information_density: 0.4
+    clarity: 0.3
+    completeness: 0.3
+  # Semantic PromptSpec mutation frequency (higher-level, meaning-changing edits)
+  semantic_mutation_probability: 0.25
+  # Exploration: inject diversity to avoid local optima (modest by default)
+  exploration_rate: 0.15
+  exploration_epsilon: 0.10
+  num_random_immigrants: null
+  # Speed: in-memory evaluation cache within a run
+  enable_eval_cache: true
 
 # Task / topic (default seed instruction)
 default_task: "Explain inflation clearly to a college student."

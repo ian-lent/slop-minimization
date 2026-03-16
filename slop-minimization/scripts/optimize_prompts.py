@@ -139,6 +139,8 @@ def main() -> None:
         best_row = leaderboard[0]
         struct = best_row.get("structural_diagnostics", {})
         semantic = best_row.get("semantic_diagnostics", {})
+        quality = best_row.get("quality_diagnostics", {})
+        provenance = best_row.get("provenance", "unknown")
         if struct:
             print("  Structural:", dict(sorted(struct.items())))
         else:
@@ -147,8 +149,21 @@ def main() -> None:
             print("  Semantic:", dict(sorted(semantic.items())))
         else:
             print("  Semantic: (none)")
+        if quality:
+            print("  Quality:", dict(sorted(quality.items())))
+            print(f"  Avg quality score: {best_row.get('avg_quality_score', 0.0):.4f}")
+            print(f"  Quality reward contribution: {best_row.get('quality_reward_contribution', 0.0):.4f}")
+        else:
+            print("  Quality: (none)")
+        print(f"  Provenance: {provenance}")
     else:
         print("  (no leaderboard)")
+
+    print("\n" + "=" * 60)
+    print("CACHE STATS")
+    print("=" * 60)
+    print(f"Eval cache hits:   {result.get('eval_cache_hits', 0)}")
+    print(f"Eval cache misses: {result.get('eval_cache_misses', 0)}")
 
     print("\n" + "=" * 60)
     print("SUMMARY")

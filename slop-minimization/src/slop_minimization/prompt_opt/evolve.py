@@ -9,7 +9,7 @@ from typing import Any, Callable
 
 from .templates import PromptSpec, render_prompt, get_seeds_for_task, prompt_spec_to_dict, dict_to_prompt_spec, RENDER_MODES
 from .mutations import mutate_spec
-from slop_minimization.scoring.diagnostics import compute_semantic_diagnostics
+from slop_minimization.scoring.diagnostics import compute_semantic_diagnostics, compute_quality_diagnostics
 
 
 def _task_keywords_from_instruction(task_instruction: str, max_words: int = 10) -> list[str]:
@@ -81,6 +81,37 @@ def _semantic_penalty_from_outputs(
     return penalty, summary
 
 
+def _quality_reward_from_outputs(
+    valid_outputs: list[str],
+    structural_diag_summary: dict[str, float],
+    semantic_diag_summary: dict[str, float],
+    task_keywords: list[str],
+    weights: dict[str, float] | None = None,
+) -> tuple[float, dict[str, float]]:
+    """Compute average quality score (0..1) and summary diagnostics (means)."""
+    if not valid_outputs:
+        return 0.0, {}
+    diags = [
+        compute_quality_diagnostics(
+            out,
+            prompt_text=None,
+            task_keywords=task_keywords,
+            structural_diag=structural_diag_summary,
+            semantic_diag=semantic_diag_summary,
+            weights=weights,
+        )
+        for out in valid_outputs
+    ]
+    # Aggregate (mean)
+    summary: dict[str, float] = {}
+    for key in ["information_density_score", "clarity_score", "completeness_score", "quality_score"]:
+        vals = [d[key] for d in diags if isinstance(d.get(key), (int, float))]
+        if vals:
+            summary[key] = sum(vals) / len(vals)
+    avg_quality = summary.get("quality_score", 0.0)
+    return float(avg_quality), summary
+
+
 def evaluate_prompt(
     prompt_spec: PromptSpec,
     generator: Any,
@@ -92,13 +123,19 @@ def evaluate_prompt(
     lambda_structural: float = 0.0,
     structural_threshold: float = 0.25,
     lambda_semantic: float = 0.0,
+    lambda_quality: float = 0.0,
     task_instruction: str | None = None,
     task_keywords: list[str] | None = None,
+    quality_weights: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     """Generate n_samples from the prompt, score with reward model, return averaged metrics and diagnostics.
 
     Outputs below min_length (word count) are rejected and not scored; they are counted in invalid_count.
-    Penalties: total reward = base_reward - lambda_structural * structural_penalty - lambda_semantic * semantic_penalty.
+    Total reward:
+      base_reward
+      - lambda_structural * structural_penalty
+      - lambda_semantic * semantic_penalty
+      + lambda_quality * quality_score
     task_keywords used for task relevance; if None and task_instruction provided, derived from task_instruction.
     """
     import random
@@ -130,10 +167,13 @@ def evaluate_prompt(
             "structural_penalty_contribution": 0.0,
             "avg_semantic_penalty": 0.0,
             "semantic_penalty_contribution": 0.0,
+            "avg_quality_score": 0.0,
+            "quality_reward_contribution": 0.0,
             "avg_doc_slop_score": 1.0,
             "diagnostics_summary": {},
             "structural_diagnostics": {},
             "semantic_diagnostics": {},
+            "quality_diagnostics": {},
             "error": "all outputs below min_length",
         }
 
@@ -163,7 +203,16 @@ def evaluate_prompt(
     )
     semantic_contribution = lambda_semantic * semantic_penalty
 
-    avg_reward = avg_base_reward - structural_contribution - semantic_contribution
+    avg_quality_score, quality_diagnostics = _quality_reward_from_outputs(
+        valid_outputs,
+        structural_diag_summary={**diag_summary, **structural_diagnostics},
+        semantic_diag_summary=semantic_diagnostics,
+        task_keywords=keywords,
+        weights=quality_weights,
+    )
+    quality_contribution = lambda_quality * avg_quality_score
+
+    avg_reward = avg_base_reward - structural_contribution - semantic_contribution + quality_contribution
 
     return {
         "prompt_spec": prompt_spec_to_dict(prompt_spec),
@@ -178,10 +227,13 @@ def evaluate_prompt(
         "structural_penalty_contribution": structural_contribution,
         "avg_semantic_penalty": semantic_penalty,
         "semantic_penalty_contribution": semantic_contribution,
+        "avg_quality_score": avg_quality_score,
+        "quality_reward_contribution": quality_contribution,
         "avg_doc_slop_score": avg_doc_slop_score,
         "diagnostics_summary": diag_summary,
         "structural_diagnostics": structural_diagnostics,
         "semantic_diagnostics": semantic_diagnostics,
+        "quality_diagnostics": quality_diagnostics,
         "error": None,
     }
 
@@ -205,6 +257,19 @@ class HillClimbConfig:
     # Semantic penalty: discourage meta-instructional, writing-advice, off-task outputs (A8 refinement)
     lambda_semantic: float = 0.12
     task_keywords: list[str] = field(default_factory=list)  # for task relevance; empty => derive from task_instruction
+    # Quality reward (lightweight heuristics): modest positive signal for useful outputs
+    lambda_quality: float = 0.10
+    quality_weights: dict[str, float] = field(default_factory=lambda: {
+        "information_density": 0.4,
+        "clarity": 0.3,
+        "completeness": 0.3,
+    })
+    # Search extensions
+    semantic_mutation_probability: float = 0.25
+    exploration_rate: float = 0.15  # fraction of next-gen reserved for exploration/immigrants
+    exploration_epsilon: float = 0.10  # chance to pick lower-ranked parent for mutation
+    num_random_immigrants: int | None = None  # if set, overrides exploration_rate
+    enable_eval_cache: bool = True  # in-memory eval cache within a run
 
 
 def run_hill_climbing(
@@ -226,12 +291,22 @@ def run_hill_climbing(
         config = HillClimbConfig(**{k: v for k, v in config.items() if k in HillClimbConfig.__dataclass_fields__})
     rng = random.Random(config.random_seed)
 
+    # In-memory eval cache (per-run) for identical evaluation contexts.
+    eval_cache: dict[tuple, dict[str, Any]] = {}
+    cache_hits = 0
+    cache_misses = 0
+
     seeds = seed_specs or get_seeds_for_task(task_instruction)
     population: list[PromptSpec] = []
     # Start with seeds; if we need more to fill population_size, duplicate randomly
     while len(population) < config.population_size:
         population.append(rng.choice(seeds).copy())
     population = population[: config.population_size]
+
+    # Provenance / mutation-type tracking keyed by rendered prompt text.
+    # This is stable across copies of the same logical prompt and extensible for future operators.
+    provenance_by_prompt: dict[str, str] = {}
+    mutation_info_by_prompt: dict[str, dict[str, Any]] = {}
 
     all_candidates: list[dict[str, Any]] = []
     invalid_generations: list[dict[str, Any]] = []
@@ -260,27 +335,77 @@ def run_hill_climbing(
                 "preserve_one_unmutated_best": getattr(config, "preserve_one_unmutated_best", True),
                 "lambda_semantic": getattr(config, "lambda_semantic", 0.0),
                 "task_keywords": getattr(config, "task_keywords", []) or [],
+                "lambda_quality": getattr(config, "lambda_quality", 0.0),
+                "quality_weights": getattr(config, "quality_weights", {}) or {},
+                "semantic_mutation_probability": getattr(config, "semantic_mutation_probability", 0.0),
+                "exploration_rate": getattr(config, "exploration_rate", 0.0),
+                "exploration_epsilon": getattr(config, "exploration_epsilon", 0.0),
+                "num_random_immigrants": getattr(config, "num_random_immigrants", None),
+                "enable_eval_cache": getattr(config, "enable_eval_cache", True),
             }
             yaml.dump(cfg_dict, f, default_flow_style=False)
+
+    # Initial population comes directly from seeds.
+    for spec in population:
+        pt = render_prompt(spec, mode=config.render_mode)
+        provenance_by_prompt.setdefault(pt, "seed")
+        mutation_info_by_prompt.setdefault(pt, {"mutation_type": "none", "mutation_helper": None})
 
     for iteration in range(config.num_iterations):
         # Evaluate current population
         scores: list[tuple[float, dict[str, Any]]] = []
         for spec in population:
-            res = evaluate_prompt(
-                spec,
-                generator,
-                reward_model,
-                n_samples=config.samples_per_prompt,
-                min_length=config.min_output_length,
-                rng=rng,
-                render_mode=config.render_mode,
-                lambda_structural=getattr(config, "lambda_structural", 0.0),
-                structural_threshold=getattr(config, "structural_threshold", 0.25),
-                lambda_semantic=getattr(config, "lambda_semantic", 0.0),
-                task_instruction=task_instruction,
-                task_keywords=config.task_keywords if getattr(config, "task_keywords", None) else None,
+            # Cache key: rendered prompt + evaluation knobs + generator knobs.
+            prompt_text = render_prompt(spec, mode=config.render_mode)
+            cache_key = (
+                prompt_text,
+                config.samples_per_prompt,
+                config.min_output_length,
+                config.render_mode,
+                getattr(config, "lambda_structural", 0.0),
+                getattr(config, "structural_threshold", 0.25),
+                getattr(config, "lambda_semantic", 0.0),
+                tuple(getattr(config, "task_keywords", []) or []),
+                getattr(config, "lambda_quality", 0.0),
+                tuple(sorted((getattr(config, "quality_weights", {}) or {}).items())),
+                # Generator knobs that affect stochastic outputs
+                getattr(generator.config, "model_name", None),
+                getattr(generator.config, "temperature", None),
+                getattr(generator.config, "top_p", None),
+                getattr(generator.config, "max_new_tokens", None),
+                getattr(generator.config, "repetition_penalty", None),
+                getattr(generator.config, "no_repeat_ngram_size", None),
             )
+
+            if getattr(config, "enable_eval_cache", True) and cache_key in eval_cache:
+                res = dict(eval_cache[cache_key])
+                cache_hits += 1
+            else:
+                res = evaluate_prompt(
+                    spec,
+                    generator,
+                    reward_model,
+                    n_samples=config.samples_per_prompt,
+                    min_length=config.min_output_length,
+                    rng=rng,
+                    render_mode=config.render_mode,
+                    lambda_structural=getattr(config, "lambda_structural", 0.0),
+                    structural_threshold=getattr(config, "structural_threshold", 0.25),
+                    lambda_semantic=getattr(config, "lambda_semantic", 0.0),
+                    lambda_quality=getattr(config, "lambda_quality", 0.0),
+                    task_instruction=task_instruction,
+                    task_keywords=config.task_keywords if getattr(config, "task_keywords", None) else None,
+                    quality_weights=getattr(config, "quality_weights", None),
+                )
+                if getattr(config, "enable_eval_cache", True):
+                    eval_cache[cache_key] = dict(res)
+                cache_misses += 1
+
+            # Attach provenance / mutation metadata for later inspection.
+            res["provenance"] = provenance_by_prompt.get(prompt_text, "unknown")
+            mi = mutation_info_by_prompt.get(prompt_text, {})
+            res["mutation_type"] = mi.get("mutation_type", "none")
+            res["mutation_helper"] = mi.get("mutation_helper")
             if res.get("invalid_count", 0) > 0 and res.get("outputs"):
                 for i, out in enumerate(res["outputs"]):
                     if len(out.split()) < config.min_output_length:
@@ -310,15 +435,105 @@ def run_hill_climbing(
         population = []
         preserve_best = getattr(config, "preserve_one_unmutated_best", True)
         if preserve_best and top_specs:
-            population.append(top_specs[0].copy())  # one unmutated best
+            best_spec = top_specs[0].copy()
+            population.append(best_spec)  # one unmutated best
+            pt = render_prompt(best_spec, mode=config.render_mode)
+            provenance_by_prompt[pt] = "elite_carryover"
+            mutation_info_by_prompt[pt] = {"mutation_type": "none", "mutation_helper": None}
+
+        # Exploration: reserve some slots for “random immigrants”.
+        exploration_rate = float(getattr(config, "exploration_rate", 0.0) or 0.0)
+        num_random_immigrants = getattr(config, "num_random_immigrants", None)
+        if num_random_immigrants is not None:
+            n_immigrants = max(0, int(num_random_immigrants))
+        else:
+            n_immigrants = int(round(config.population_size * exploration_rate)) if exploration_rate > 0 else 0
+        n_immigrants = min(n_immigrants, max(0, config.population_size - 1))
+
+        # Mutated children (epsilon exploration chooses lower-ranked parent sometimes).
+        eps = float(getattr(config, "exploration_epsilon", 0.0) or 0.0)
+        sem_p = float(getattr(config, "semantic_mutation_probability", 0.0) or 0.0)
         for i, spec in enumerate(top_specs):
             if i > 0 or not preserve_best:
-                population.append(spec.copy())
+                carried = spec.copy()
+                population.append(carried)
+                pt = render_prompt(carried, mode=config.render_mode)
+                provenance_by_prompt[pt] = "elite_carryover"
+                mutation_info_by_prompt[pt] = {"mutation_type": "none", "mutation_helper": None}
             for _ in range(config.children_per_parent - 1):
-                population.append(mutate_spec(spec.copy(), rng, config.mutation_strength))
+                parent = spec
+                used_epsilon = False
+                if top_specs and eps > 0 and rng.random() < eps:
+                    parent = rng.choice(top_specs)
+                    used_epsilon = True
+                info: dict[str, Any] = {}
+                child = mutate_spec(
+                    parent.copy(),
+                    rng,
+                    config.mutation_strength,
+                    semantic_mutation_probability=sem_p,
+                    mutation_info=info,
+                )
+                population.append(child)
+                pt = render_prompt(child, mode=config.render_mode)
+                # Provenance taxonomy for children
+                if used_epsilon:
+                    provenance_by_prompt[pt] = "epsilon_parent_mutation"
+                elif info.get("mutation_type") == "semantic":
+                    provenance_by_prompt[pt] = "semantic_mutation"
+                else:
+                    provenance_by_prompt[pt] = "standard_mutation"
+                mutation_info_by_prompt[pt] = {
+                    "mutation_type": info.get("mutation_type", "slot"),
+                    "mutation_helper": info.get("mutation_helper"),
+                }
+
+        # Keep legacy random explore (small) for backward compatibility.
         for _ in range(config.keep_random_explore):
             base = rng.choice(seeds).copy()
-            population.append(mutate_spec(base, rng, config.mutation_strength))
+            info: dict[str, Any] = {}
+            explorer = mutate_spec(
+                base,
+                rng,
+                config.mutation_strength,
+                semantic_mutation_probability=sem_p,
+                mutation_info=info,
+            )
+            population.append(explorer)
+            pt = render_prompt(explorer, mode=config.render_mode)
+            provenance_by_prompt[pt] = "random_exploration_seed_mutant"
+            mutation_info_by_prompt[pt] = {
+                "mutation_type": info.get("mutation_type", "slot"),
+                "mutation_helper": info.get("mutation_helper"),
+            }
+
+        # Add immigrants last; they will survive trimming if exploration is enabled.
+        for _ in range(n_immigrants):
+            if rng.random() < 0.5:
+                imm = rng.choice(seeds).copy()
+                population.append(imm)
+                pt = render_prompt(imm, mode=config.render_mode)
+                provenance_by_prompt[pt] = "random_immigrant_seed"
+                mutation_info_by_prompt[pt] = {"mutation_type": "none", "mutation_helper": None}
+            else:
+                parent = rng.choice(top_specs).copy() if top_specs else rng.choice(seeds).copy()
+                info: dict[str, Any] = {}
+                imm = mutate_spec(
+                    parent,
+                    rng,
+                    config.mutation_strength,
+                    semantic_mutation_probability=sem_p,
+                    mutation_info=info,
+                )
+                population.append(imm)
+                pt = render_prompt(imm, mode=config.render_mode)
+                provenance_by_prompt[pt] = "random_immigrant_mutated_parent"
+                mutation_info_by_prompt[pt] = {
+                    "mutation_type": info.get("mutation_type", "slot"),
+                    "mutation_helper": info.get("mutation_helper"),
+                }
+
+        # Trim to population_size
         population = population[: config.population_size]
 
     # Build leaderboard from all_candidates (dedupe by prompt_text, keep best reward)
@@ -347,11 +562,17 @@ def run_hill_climbing(
                     "structural_penalty_contribution": row.get("structural_penalty_contribution", 0.0),
                     "avg_semantic_penalty": row.get("avg_semantic_penalty", 0.0),
                     "semantic_penalty_contribution": row.get("semantic_penalty_contribution", 0.0),
+                    "avg_quality_score": row.get("avg_quality_score", 0.0),
+                    "quality_reward_contribution": row.get("quality_reward_contribution", 0.0),
                     "structural_diagnostics": row.get("structural_diagnostics", {}),
                     "semantic_diagnostics": row.get("semantic_diagnostics", {}),
+                    "quality_diagnostics": row.get("quality_diagnostics", {}),
                     "avg_doc_slop_score": row["avg_doc_slop_score"],
                     "generation_count": row.get("generation_count", 0),
                     "iteration_found": iteration_found.get(row["prompt_text"], -1),
+                    "provenance": row.get("provenance", "unknown"),
+                    "mutation_type": row.get("mutation_type", "none"),
+                    "mutation_helper": row.get("mutation_helper"),
                 }
                 f.write(json.dumps(out_row) + "\n")
         best = leaderboard[0] if leaderboard else {}
@@ -365,9 +586,14 @@ def run_hill_climbing(
                     "avg_base_reward": c.get("avg_base_reward", c["avg_reward"]),
                     "structural_penalty_contribution": c.get("structural_penalty_contribution", 0.0),
                     "semantic_penalty_contribution": c.get("semantic_penalty_contribution", 0.0),
+                    "quality_reward_contribution": c.get("quality_reward_contribution", 0.0),
                     "structural_diagnostics": c.get("structural_diagnostics", {}),
                     "semantic_diagnostics": c.get("semantic_diagnostics", {}),
+                    "quality_diagnostics": c.get("quality_diagnostics", {}),
                     "outputs": c.get("valid_outputs", [])[:3],
+                    "provenance": c.get("provenance", "unknown"),
+                    "mutation_type": c.get("mutation_type", "none"),
+                    "mutation_helper": c.get("mutation_helper"),
                 }) + "\n")
         if invalid_generations:
             with open(out_path / "invalid_generations.jsonl", "w") as f:
@@ -382,8 +608,33 @@ def run_hill_climbing(
                 base = row.get("avg_base_reward", row["avg_reward"])
                 sp = row.get("structural_penalty_contribution", 0.0)
                 mp = row.get("semantic_penalty_contribution", 0.0)
-                f.write(f"### {i}. reward={row['avg_reward']:.4f} (base={base:.4f}, struct_pen={sp:.4f}, semantic_pen={mp:.4f})\n\n")
+                qp = row.get("quality_reward_contribution", 0.0)
+                prov = row.get("provenance", "unknown")
+                mtype = row.get("mutation_type", "none")
+                mhelper = row.get("mutation_helper") or "n/a"
+                f.write(
+                    f"### {i}. reward={row['avg_reward']:.4f} "
+                    f"(base={base:.4f}, struct_pen={sp:.4f}, semantic_pen={mp:.4f}, "
+                    f"quality={qp:.4f}, source={prov}, mutation_type={mtype}, mutation_helper={mhelper})\n\n"
+                )
                 f.write(f"```\n{row['prompt_text']}\n```\n\n")
+
+        # Lightweight run-level stats for cache and search settings.
+        with open(out_path / "stats.json", "w") as f:
+            json.dump(
+                {
+                    "eval_cache_hits": cache_hits,
+                    "eval_cache_misses": cache_misses,
+                    "cache_enabled": getattr(config, "enable_eval_cache", True),
+                    "lambda_quality": getattr(config, "lambda_quality", 0.0),
+                    "semantic_mutation_probability": getattr(config, "semantic_mutation_probability", 0.0),
+                    "exploration_rate": getattr(config, "exploration_rate", 0.0),
+                    "exploration_epsilon": getattr(config, "exploration_epsilon", 0.0),
+                    "num_random_immigrants": getattr(config, "num_random_immigrants", None),
+                },
+                f,
+                indent=2,
+            )
 
     return {
         "leaderboard": leaderboard,
@@ -394,6 +645,8 @@ def run_hill_climbing(
         "example_generation": example_generation,
         "output_dir": str(out_path) if out_path else None,
         "invalid_count": len(invalid_generations),
+        "eval_cache_hits": cache_hits,
+        "eval_cache_misses": cache_misses,
     }
 
 

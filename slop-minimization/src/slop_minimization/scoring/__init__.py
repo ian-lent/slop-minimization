@@ -6,6 +6,7 @@ from .diagnostics import (
     compute_diagnostics,
     compute_structural_diagnostics,
     compute_semantic_diagnostics,
+    compute_quality_diagnostics,
 )
 
 __all__ = [
@@ -16,4 +17,5 @@ __all__ = [
     "compute_diagnostics",
     "compute_structural_diagnostics",
     "compute_semantic_diagnostics",
+    "compute_quality_diagnostics",
 ]

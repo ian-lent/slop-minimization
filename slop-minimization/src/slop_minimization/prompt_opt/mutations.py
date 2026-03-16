@@ -75,6 +75,110 @@ REASONING_STYLES = [
 ]
 
 
+# ---- Semantic mutation templates (PromptSpec-level; no raw prompt string edits) ----
+
+# These templates are intentionally short and reusable to avoid brittle giant prompt blobs.
+CONSTRAINT_SEMANTIC_TEMPLATES = [
+    "Explain the main idea in direct language with one concrete example.",
+    "Use only the detail needed to fully answer the task.",
+    "Avoid generic writing advice; focus on the specific question.",
+    "Define key terms briefly, then apply them to the task.",
+]
+
+ANTI_SLOP_SEMANTIC_TEMPLATES = [
+    "Avoid talking about how to write; focus on answering the task itself.",
+    "Do not repeat the instructions; answer as if the task is already understood.",
+    "Avoid long lists or decorative formatting unless essential to the explanation.",
+    "Avoid rubric language like 'be concise' or 'use short sentences' in the output.",
+]
+
+PROSE_FORMAT_TEMPLATES = [
+    "Write in short, coherent paragraphs rather than bullet lists.",
+    "Use 1–3 short paragraphs with one concrete example; avoid list-heavy formatting.",
+]
+
+MIXED_FORMAT_TEMPLATES = [
+    "Use short paragraphs; bullets only if they make the explanation clearer (keep bullets minimal).",
+    "Write mostly prose; a short bullet list is allowed if it adds clarity.",
+]
+
+LIST_FRIENDLY_FORMAT_TEMPLATES = [
+    "Combine a brief paragraph with a short, focused bullet list (no long lists).",
+    "You may use bullets sparingly, but keep the explanation primarily in prose.",
+]
+
+REASONING_STYLE_TEMPLATES = [
+    "Answer directly, then briefly justify with one concrete example.",
+    "Focus on concrete explanation rather than abstract writing advice.",
+    "Reason step by step internally, but present only the final explanation.",
+]
+
+
+def mutate_constraints_semantically(spec: PromptSpec, rng: "Random") -> None:
+    """Semantic constraint mutation: tighten vague constraints and add concrete, task-helpful constraints."""
+    replacements = {
+        "Be concise.": "Use only the detail needed to fully answer the task.",
+        "Be specific.": "Explain the main idea in direct language with one concrete example.",
+        "Stay on topic.": "Avoid generic writing advice; focus on the specific question.",
+    }
+    # Prefer rewriting existing vague constraints
+    for i, c in enumerate(list(spec.constraints)):
+        if c in replacements and rng.random() < 0.7:
+            spec.constraints[i] = replacements[c]
+            return
+    # Otherwise add a constraint (avoid duplicates)
+    candidate = rng.choice(CONSTRAINT_SEMANTIC_TEMPLATES)
+    if candidate not in spec.constraints:
+        spec.constraints.append(candidate)
+
+
+def mutate_anti_slop_semantically(spec: PromptSpec, rng: "Random") -> None:
+    """Semantic anti_slop mutation: add anti-meta/off-task guidance in natural language."""
+    candidate = rng.choice(ANTI_SLOP_SEMANTIC_TEMPLATES)
+    if spec.anti_slop and rng.random() < 0.6:
+        idx = rng.randint(0, len(spec.anti_slop) - 1)
+        spec.anti_slop[idx] = candidate
+    else:
+        if candidate not in spec.anti_slop:
+            spec.anti_slop.append(candidate)
+
+
+def mutate_output_format_semantically(spec: PromptSpec, rng: "Random") -> None:
+    """Semantic output_format mutation: align formatting guidance with structure_preference."""
+    pref = getattr(spec, "structure_preference", "prose_preferred")
+    if pref == "prose_preferred":
+        spec.output_format = rng.choice(PROSE_FORMAT_TEMPLATES)
+    elif pref == "mixed":
+        spec.output_format = rng.choice(MIXED_FORMAT_TEMPLATES)
+    else:  # list_friendly
+        spec.output_format = rng.choice(LIST_FRIENDLY_FORMAT_TEMPLATES)
+
+
+def mutate_reasoning_style_semantically(spec: PromptSpec, rng: "Random") -> None:
+    """Semantic reasoning_style mutation: encourage direct answers + concrete justification."""
+    spec.reasoning_style = rng.choice(REASONING_STYLE_TEMPLATES)
+
+
+def _apply_semantic_mutation(spec: PromptSpec, rng: "Random", mutation_info: dict | None = None) -> None:
+    """Apply one semantic mutation op to a PromptSpec (field-level).
+
+    If mutation_info is provided, it will be populated with:
+    - mutation_type: \"semantic\"
+    - mutation_helper: name of the semantic helper function that fired.
+    """
+    ops = [
+        mutate_constraints_semantically,
+        mutate_anti_slop_semantically,
+        mutate_output_format_semantically,
+        mutate_reasoning_style_semantically,
+    ]
+    op = rng.choice(ops)
+    if mutation_info is not None:
+        mutation_info["mutation_type"] = "semantic"
+        mutation_info["mutation_helper"] = op.__name__
+    op(spec, rng)
+
+
 def _pick_mutation_target(spec: PromptSpec, rng: "Random") -> str:
     """Choose which slot to mutate. When prose_preferred, downweight output_format."""
     candidates = []
@@ -190,10 +294,31 @@ def mutate_spec(
     spec: PromptSpec,
     rng: "Random",
     mutation_strength: str = "medium",
+    semantic_mutation_probability: float = 0.0,
+    mutation_info: dict | None = None,
 ) -> PromptSpec:
-    """Return a new PromptSpec with one slot mutated. Stochastic but reproducible with same rng."""
+    """Return a new PromptSpec with one mutation applied.
+
+    Mutation types:
+    - semantic mutation (field-level, meaning-changing) with configurable probability
+    - existing structural mutation (specificity/brevity/etc.)
+    - slot mutation (role/constraints/anti_slop/output_format/etc.)
+    """
     out = spec.copy()
+    # Optional metadata channel for callers that want to log mutation provenance.
+    # When provided, this dict will be cleared and then populated with:
+    # - mutation_type: \"semantic\" | \"structural\" | \"slot\"
+    # - mutation_helper: helper name or None
+    if mutation_info is not None:
+        mutation_info.clear()
+        mutation_info["mutation_type"] = "slot"
+        mutation_info["mutation_helper"] = None
     strength = mutation_strength if mutation_strength in ("light", "medium") else "medium"
+
+    # Semantic mutation: higher-level edits that improve intent while staying within PromptSpec abstraction.
+    if semantic_mutation_probability > 0 and rng.random() < semantic_mutation_probability:
+        _apply_semantic_mutation(out, rng, mutation_info=mutation_info)
+        return out
 
     # With some probability, apply a "structural" mutation instead of slot pick
     if rng.random() < 0.25:
@@ -203,6 +328,9 @@ def mutate_spec(
             _add_avoid_generic,
             _add_justify_concretely,
         ])
+        if mutation_info is not None:
+            mutation_info["mutation_type"] = "structural"
+            mutation_info["mutation_helper"] = op.__name__
         op(out, rng)
         return out
 

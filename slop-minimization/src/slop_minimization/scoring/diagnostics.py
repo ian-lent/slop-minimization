@@ -99,6 +99,160 @@ def compute_structural_diagnostics(text: str) -> dict[str, float]:
     }
 
 
+# ---- Quality diagnostics (lightweight, interpretable heuristics) ----
+
+# Minimal stopword set: good enough for a cheap “content token” ratio.
+_STOPWORDS = {
+    "the", "a", "an", "to", "in", "on", "for", "of", "and", "or", "is", "are", "be", "by",
+    "with", "as", "your", "you", "that", "this", "it", "if", "when", "how", "what", "why",
+    "can", "should", "use", "write", "explain", "give", "provide", "very", "really",
+    "just", "also", "so",
+}
+
+
+def information_density_score(text: str) -> float:
+    """Heuristic [0,1]: reward outputs that are contentful rather than repetitive or empty.
+
+    Combines:
+    - unique token ratio
+    - non-stopword token ratio
+    - soft penalty for extremely short outputs
+    """
+    if not text or not text.strip():
+        return 0.0
+    tokens = re.findall(r"\b\w+\b", text.lower())
+    if not tokens:
+        return 0.0
+    unique_ratio = len(set(tokens)) / max(len(tokens), 1)
+    non_stop_ratio = sum(1 for t in tokens if t not in _STOPWORDS) / max(len(tokens), 1)
+
+    # Soft length factor: below ~15 tokens penalized; plateaus by ~80 tokens.
+    n = len(tokens)
+    if n <= 3:
+        length_factor = 0.0
+    elif n < 15:
+        length_factor = (n - 3) / 12.0
+    else:
+        length_factor = min(1.0, n / 80.0)
+
+    raw = 0.5 * unique_ratio + 0.5 * non_stop_ratio
+    return max(0.0, min(1.0, raw * length_factor))
+
+
+def clarity_score(
+    text: str,
+    abnormal_punct: float | None = None,
+    repetition: float | None = None,
+    instruction_echo: float | None = None,
+) -> float:
+    """Heuristic [0,1]: reward outputs that read clearly.
+
+    Cheap, interpretable mix of:
+    - sentence length moderation (not too short, not too long)
+    - lower abnormal punctuation density
+    - lower repetition
+    - lower meta/instruction echo language
+    """
+    if not text or not text.strip():
+        return 0.0
+
+    # Sentence length moderation
+    sentences = re.split(r"[.!?]+", text)
+    sent_lens = [len(s.split()) for s in sentences if s.strip()]
+    if not sent_lens:
+        sent_len_score = 0.0
+    else:
+        avg_len = sum(sent_lens) / len(sent_lens)
+        if avg_len < 5:
+            sent_len_score = avg_len / 5.0
+        elif avg_len > 40:
+            sent_len_score = max(0.0, 1.0 - (avg_len - 40) / 40.0)
+        else:
+            sent_len_score = 1.0
+
+    ab = abnormal_punct if isinstance(abnormal_punct, (int, float)) else abnormal_punctuation_density(text)
+    rep = repetition if isinstance(repetition, (int, float)) else repetition_ratio(text, n=2)
+    inst = instruction_echo if isinstance(instruction_echo, (int, float)) else instruction_echo_ratio(text)
+
+    def invert(x: float, k: float = 1.0) -> float:
+        return max(0.0, min(1.0, 1.0 - x * k))
+
+    punct_score = invert(float(ab), k=1.0)
+    rep_score = invert(float(rep), k=2.0)
+    inst_score = invert(float(inst), k=2.0)
+
+    return max(
+        0.0,
+        min(1.0, 0.4 * sent_len_score + 0.2 * punct_score + 0.2 * rep_score + 0.2 * inst_score),
+    )
+
+
+def completeness_score(text: str, task_keywords: list[str] | None = None) -> float:
+    """Heuristic [0,1]: reward outputs that address the task.
+
+    Intended behavior:
+    - When task_keywords are available, primary signal is keyword/task coverage via task_relevance_score.
+      If coverage is extremely low, fall back slightly toward information_density so non-empty but
+      poorly-keyworded answers are not treated as completely incomplete.
+    - When task_keywords are absent, degrade to a simple content/length proxy (information density).
+    """
+    if not text or not text.strip():
+        return 0.0
+    kws = task_keywords or []
+    if kws:
+        rel = task_relevance_score(text, kws)
+        if rel > 0.0:
+            return rel
+        # Very low keyword overlap: treat as weakly complete if it still has content.
+        dens = information_density_score(text)
+        return max(0.0, min(1.0, 0.3 * dens))
+    return information_density_score(text)
+
+
+def compute_quality_diagnostics(
+    text: str,
+    prompt_text: str | None = None,
+    task_keywords: list[str] | None = None,
+    structural_diag: dict[str, Any] | None = None,
+    semantic_diag: dict[str, Any] | None = None,
+    weights: dict[str, float] | None = None,
+) -> dict[str, float]:
+    """Quality diagnostics for a single output.
+
+    Returns:
+    - information_density_score
+    - clarity_score
+    - completeness_score
+    - quality_score (weighted combination; weights are configurable)
+    """
+    structural_diag = structural_diag or {}
+    semantic_diag = semantic_diag or {}
+    w = weights or {"information_density": 0.4, "clarity": 0.3, "completeness": 0.3}
+
+    info = information_density_score(text)
+    clar = clarity_score(
+        text,
+        abnormal_punct=structural_diag.get("abnormal_punctuation_density"),
+        repetition=structural_diag.get("repetition_ratio"),
+        instruction_echo=semantic_diag.get("instruction_echo_ratio"),
+    )
+    comp = completeness_score(text, task_keywords=task_keywords or [])
+
+    total_w = max(1e-6, float(w.get("information_density", 0.0) + w.get("clarity", 0.0) + w.get("completeness", 0.0)))
+    quality = (
+        info * float(w.get("information_density", 0.0))
+        + clar * float(w.get("clarity", 0.0))
+        + comp * float(w.get("completeness", 0.0))
+    ) / total_w
+
+    return {
+        "information_density_score": float(info),
+        "clarity_score": float(clar),
+        "completeness_score": float(comp),
+        "quality_score": float(max(0.0, min(1.0, quality))),
+    }
+
+
 def repetition_ratio(text: str, n: int = 2) -> float:
     """Fraction of tokens that are part of a repeated n-gram (n tokens repeated)."""
     tokens = text.split()
