@@ -32,8 +32,29 @@ class PromptSpec:
         )
 
 
-def render_prompt(spec: PromptSpec) -> str:
-    """Turn a PromptSpec into a single string for the generator."""
+RENDER_MODES = ("structured", "simple", "compact")
+
+
+def render_prompt(spec: PromptSpec, mode: str = "structured") -> str:
+    """Turn a PromptSpec into a single string for the generator.
+
+    Modes:
+    - structured: Role / Task / Constraints / Style sections (current behavior).
+    - simple: Natural instruction paragraph (task + short sentences for constraints/style).
+    - compact: Minimal single-block format (task + semicolon-separated constraints/style).
+    """
+    if mode not in RENDER_MODES:
+        mode = "structured"
+
+    if mode == "structured":
+        return _render_structured(spec)
+    if mode == "simple":
+        return _render_simple(spec)
+    return _render_compact(spec)
+
+
+def _render_structured(spec: PromptSpec) -> str:
+    """Current section-based format."""
     parts = []
     if spec.role:
         parts.append(f"Role: {spec.role}")
@@ -56,6 +77,57 @@ def render_prompt(spec: PromptSpec) -> str:
     if spec.reasoning_style:
         parts.append(f"Reasoning: {spec.reasoning_style}")
     return "\n\n".join(parts).strip() or "Write clearly and precisely."
+
+
+def _render_simple(spec: PromptSpec) -> str:
+    """Natural instruction paragraph: task first, then constraints and style as short sentences."""
+    sentences = []
+    if spec.task:
+        sentences.append(spec.task.rstrip(".") + ".")
+    if spec.constraints:
+        for c in spec.constraints:
+            s = c.strip().rstrip(".")
+            if s and not s[0].isupper():
+                s = s[0].upper() + s[1:]
+            sentences.append(s + "." if not s.endswith(".") else s)
+    if spec.anti_slop:
+        for a in spec.anti_slop:
+            s = a.strip().rstrip(".")
+            if s and not s[0].isupper():
+                s = s[0].upper() + s[1:]
+            sentences.append(s + "." if not s.endswith(".") else s)
+    if spec.output_format:
+        sentences.append(spec.output_format.rstrip(".") + ".")
+    if spec.tone:
+        sentences.append(spec.tone.rstrip(".") + ".")
+    if spec.audience:
+        sentences.append(f"Write for {spec.audience.lower().rstrip('.')}.")
+    if spec.reasoning_style:
+        sentences.append(spec.reasoning_style.rstrip(".") + ".")
+    return " ".join(sentences).strip() or "Write clearly and precisely."
+
+
+def _render_compact(spec: PromptSpec) -> str:
+    """Minimal format: task line then semicolon-separated constraints and style."""
+    parts = []
+    if spec.task:
+        parts.append(spec.task.strip())
+    extras = []
+    if spec.constraints:
+        extras.append("Constraints: " + "; ".join(c.strip().rstrip(".") for c in spec.constraints))
+    if spec.anti_slop:
+        extras.append("Style: " + "; ".join(a.strip().rstrip(".") for a in spec.anti_slop))
+    if spec.output_format:
+        extras.append("Format: " + spec.output_format.strip().rstrip("."))
+    if spec.tone:
+        extras.append("Tone: " + spec.tone.strip().rstrip("."))
+    if spec.audience:
+        extras.append("Audience: " + spec.audience.strip().rstrip("."))
+    if spec.reasoning_style:
+        extras.append("Reasoning: " + spec.reasoning_style.strip().rstrip("."))
+    if extras:
+        parts.append(". ".join(extras))
+    return " ".join(parts).strip() or "Write clearly and precisely."
 
 
 def prompt_spec_to_dict(spec: PromptSpec) -> dict[str, Any]:

@@ -3,6 +3,7 @@
 from .templates import (
     PromptSpec,
     render_prompt,
+    RENDER_MODES,
     prompt_spec_to_dict,
     dict_to_prompt_spec,
     get_seeds_for_task,
@@ -10,11 +11,18 @@ from .templates import (
 )
 from .mutations import mutate_spec
 from .generator import FrozenGenerator, GeneratorConfig
-from .evolve import evaluate_prompt, run_hill_climbing, HillClimbConfig, compare_seed_vs_optimized
+from .evolve import (
+    evaluate_prompt,
+    run_hill_climbing,
+    HillClimbConfig,
+    compare_seed_vs_optimized,
+    compare_rendering_modes,
+)
 
 __all__ = [
     "PromptSpec",
     "render_prompt",
+    "RENDER_MODES",
     "prompt_spec_to_dict",
     "dict_to_prompt_spec",
     "get_seeds_for_task",
@@ -26,4 +34,5 @@ __all__ = [
     "run_hill_climbing",
     "HillClimbConfig",
     "compare_seed_vs_optimized",
+    "compare_rendering_modes",
 ]

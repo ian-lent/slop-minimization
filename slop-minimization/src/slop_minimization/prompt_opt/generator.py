@@ -20,6 +20,9 @@ class GeneratorConfig:
     device: str | None = None
     batch_size: int = 4  # for generate_batch
     pad_token_id: int | None = None  # set from tokenizer if None
+    repetition_penalty: float = 1.0  # >1 reduces repetition
+    no_repeat_ngram_size: int = 0  # 0 = disabled; 2/3/4 block repeating n-grams
+    eos_token_id: int | None = None  # set from tokenizer if None; stop at EOS when set
 
 
 class FrozenGenerator:
@@ -47,6 +50,8 @@ class FrozenGenerator:
             self.config.pad_token_id = self._tokenizer.pad_token_id
         if self._tokenizer.pad_token_id is None:
             self._tokenizer.pad_token_id = self._tokenizer.eos_token_id
+        if self.config.eos_token_id is None and getattr(self._tokenizer, "eos_token_id", None) is not None:
+            self.config.eos_token_id = self._tokenizer.eos_token_id
         self._device = torch.device(self.config.device or ("cuda" if torch.cuda.is_available() else "cpu"))
         self._model.to(self._device)
         self._model.eval()
@@ -82,15 +87,20 @@ class FrozenGenerator:
         max_tok = max_new_tokens if max_new_tokens is not None else self.config.max_new_tokens
         sample = do_sample if do_sample is not None else self.config.do_sample
         inputs = self.tokenizer(prompt, return_tensors="pt", truncation=True, max_length=1024).to(self.device)
+        gen_kwargs: dict[str, Any] = {
+            "max_new_tokens": max_tok,
+            "temperature": temp if sample else 1.0,
+            "top_p": self.config.top_p if sample else 1.0,
+            "do_sample": sample,
+            "pad_token_id": self.tokenizer.pad_token_id or self.tokenizer.eos_token_id,
+            "repetition_penalty": self.config.repetition_penalty,
+        }
+        if self.config.no_repeat_ngram_size > 0:
+            gen_kwargs["no_repeat_ngram_size"] = self.config.no_repeat_ngram_size
+        if self.config.eos_token_id is not None:
+            gen_kwargs["eos_token_id"] = self.config.eos_token_id
         with torch.no_grad():
-            out = self.model.generate(
-                **inputs,
-                max_new_tokens=max_tok,
-                temperature=temp if sample else 1.0,
-                top_p=self.config.top_p if sample else 1.0,
-                do_sample=sample,
-                pad_token_id=self.tokenizer.pad_token_id or self.tokenizer.eos_token_id,
-            )
+            out = self.model.generate(**inputs, **gen_kwargs)
         # Decode only the new tokens
         full = self.tokenizer.decode(out[0], skip_special_tokens=True)
         if full.startswith(prompt.strip()):

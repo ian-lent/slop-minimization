@@ -122,6 +122,7 @@ def main() -> None:
         n_samples=5,
         min_length=hill_config.min_output_length,
         rng=random.Random(hill_config.random_seed + 1),
+        render_mode=hill_config.render_mode,
     )
     seed_mean = eval_result["seed_mean_reward"]
     opt_mean = eval_result["optimized_mean_reward"]

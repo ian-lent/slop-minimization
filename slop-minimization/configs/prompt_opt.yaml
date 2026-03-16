@@ -9,6 +9,7 @@ reward:
   batch_size: 16
 
 # Generator (frozen causal LM) - small model for Colab
+# Optional: try a small instruction model, e.g. TinyLlama/TinyLlama-1.1B-Chat-v1.0 or microsoft/phi-2
 generator:
   model_name: gpt2
   temperature: 0.8
@@ -17,6 +18,9 @@ generator:
   do_sample: true
   device: null
   batch_size: 4
+  repetition_penalty: 1.1
+  no_repeat_ngram_size: 3
+  eos_token_id: null  # set from tokenizer if null; use to stop at EOS when supported
 
 # Search (small default budget for quick validation)
 search:
@@ -29,6 +33,8 @@ search:
   random_seed: 42
   min_output_length: 20
   keep_random_explore: 1
+  # Prompt rendering: structured (sections) | simple (natural paragraph) | compact (minimal)
+  render_mode: simple
 
 # Task / topic (default seed instruction)
 default_task: "Explain inflation clearly to a college student."

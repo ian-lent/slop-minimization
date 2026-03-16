@@ -66,12 +66,16 @@ def main() -> None:
     if not optimized_text:
         print("No prompt_text in best.", file=sys.stderr)
         sys.exit(1)
+    min_length = cfg.get("min_output_length", 20)
+    render_mode = cfg.get("render_mode", "structured")
     result = compare_seed_vs_optimized(
         task_instruction=task,
         generator=generator,
         reward_model=reward_model,
         optimized_prompt_text=optimized_text,
         n_samples=args.n_samples,
+        min_length=min_length,
+        render_mode=render_mode,
     )
     print("Task:", task)
     print(f"Seed mean reward:     {result['seed_mean_reward']:.4f}")

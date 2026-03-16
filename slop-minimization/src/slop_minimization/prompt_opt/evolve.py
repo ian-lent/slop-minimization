@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from .templates import PromptSpec, render_prompt, get_seeds_for_task, prompt_spec_to_dict, dict_to_prompt_spec
+from .templates import PromptSpec, render_prompt, get_seeds_for_task, prompt_spec_to_dict, dict_to_prompt_spec, RENDER_MODES
 from .mutations import mutate_spec
 
 
@@ -18,6 +18,7 @@ def evaluate_prompt(
     n_samples: int = 2,
     min_length: int = 20,
     rng: Any = None,
+    render_mode: str = "structured",
 ) -> dict[str, Any]:
     """Generate n_samples from the prompt, score with reward model, return averaged metrics and diagnostics.
 
@@ -25,7 +26,9 @@ def evaluate_prompt(
     """
     import random
     rng = rng or random.Random(42)
-    prompt_text = render_prompt(prompt_spec)
+    if render_mode not in RENDER_MODES:
+        render_mode = "structured"
+    prompt_text = render_prompt(prompt_spec, mode=render_mode)
     # Generate multiple times (no batching across samples to keep interface simple)
     outputs: list[str] = []
     for _ in range(n_samples):
@@ -93,6 +96,7 @@ class HillClimbConfig:
     random_seed: int = 42
     min_output_length: int = 20
     keep_random_explore: int = 1  # number of random mutants to add each iteration
+    render_mode: str = "structured"  # structured | simple | compact
 
 
 def run_hill_climbing(
@@ -142,6 +146,7 @@ def run_hill_climbing(
                 "mutation_strength": config.mutation_strength,
                 "random_seed": config.random_seed,
                 "min_output_length": config.min_output_length,
+                "render_mode": config.render_mode,
             }
             yaml.dump(cfg_dict, f, default_flow_style=False)
 
@@ -156,6 +161,7 @@ def run_hill_climbing(
                 n_samples=config.samples_per_prompt,
                 min_length=config.min_output_length,
                 rng=rng,
+                render_mode=config.render_mode,
             )
             if res.get("invalid_count", 0) > 0 and res.get("outputs"):
                 for i, out in enumerate(res["outputs"]):
@@ -264,14 +270,20 @@ def compare_seed_vs_optimized(
     n_samples: int = 5,
     min_length: int = 20,
     rng: Any = None,
+    render_mode: str = "structured",
 ) -> dict[str, Any]:
     """Compare seed prompts vs one optimized prompt on the same task. Returns mean reward for seeds and for optimized."""
     import random
     rng = rng or random.Random(42)
+    if render_mode not in RENDER_MODES:
+        render_mode = "structured"
     seeds = get_seeds_for_task(task_instruction)
     seed_rewards = []
     for spec in seeds[:3]:
-        res = evaluate_prompt(spec, generator, reward_model, n_samples=n_samples, min_length=min_length, rng=rng)
+        res = evaluate_prompt(
+            spec, generator, reward_model,
+            n_samples=n_samples, min_length=min_length, rng=rng, render_mode=render_mode,
+        )
         seed_rewards.append(res["avg_reward"])
     outputs = [generator.generate_one(optimized_prompt_text) for _ in range(n_samples)]
     valid = [t for t in outputs if len(t.split()) >= min_length]
@@ -287,3 +299,59 @@ def compare_seed_vs_optimized(
         "optimized_mean_reward": opt_reward,
         "n_samples": n_samples,
     }
+
+
+def compare_rendering_modes(
+    task_instruction: str,
+    generator: Any,
+    reward_model: Any,
+    seed_specs: list[PromptSpec] | None = None,
+    n_samples: int = 3,
+    min_length: int = 20,
+    rng: Any = None,
+) -> dict[str, Any]:
+    """Test the same seed prompts under structured, simple, and compact rendering.
+
+    Returns per-mode average reward and example outputs for each mode.
+    """
+    import random
+    rng = rng or random.Random(42)
+    seeds = seed_specs or get_seeds_for_task(task_instruction)
+    seeds = seeds[:3]  # use first 3 seeds
+
+    reward_model.load()
+    results: dict[str, Any] = {
+        "task_instruction": task_instruction,
+        "n_samples": n_samples,
+        "modes": {},
+    }
+
+    for mode in RENDER_MODES:
+        mode_rewards: list[float] = []
+        mode_examples: list[str] = []
+        for spec in seeds:
+            res = evaluate_prompt(
+                spec,
+                generator,
+                reward_model,
+                n_samples=n_samples,
+                min_length=min_length,
+                rng=rng,
+                render_mode=mode,
+            )
+            mode_rewards.append(res["avg_reward"])
+            if res.get("valid_outputs"):
+                mode_examples.append(res["valid_outputs"][0][:400])
+            elif res.get("outputs"):
+                mode_examples.append(res["outputs"][0][:400] if res["outputs"] else "")
+            else:
+                mode_examples.append("")
+        avg_reward = sum(mode_rewards) / len(mode_rewards) if mode_rewards else -1.0
+        results["modes"][mode] = {
+            "avg_reward": avg_reward,
+            "per_seed_rewards": mode_rewards,
+            "example_outputs": mode_examples,
+            "example_prompts": [render_prompt(spec, mode=mode)[:300] for spec in seeds],
+        }
+
+    return results
