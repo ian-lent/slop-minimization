@@ -8,7 +8,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "slop_src"))
 
 import yaml
 from slop.scoring import SlopRewardModel, RewardConfig
@@ -24,7 +24,7 @@ from slop.prompt_opt import (
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Optimize prompts via hill climbing to minimize slop")
-    p.add_argument("--config", type=str, default="configs/prompt_opt.yaml", help="YAML config path")
+    p.add_argument("--config", type=str, default="slop_configs/prompt_opt.yaml", help="YAML config path")
     p.add_argument("--task", type=str, default=None, help="Task/topic instruction (overrides config)")
     p.add_argument("--reward-checkpoint", type=str, default=None, help="Reward model checkpoint (overrides config)")
     p.add_argument("--reward-config", type=str, default=None, help="Reward model config YAML (overrides config)")

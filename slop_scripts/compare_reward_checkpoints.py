@@ -8,7 +8,7 @@ import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "slop_src"))
 
 from slop.scoring import SlopRewardModel, RewardConfig
 from slop.scoring.diagnostics import compute_diagnostics

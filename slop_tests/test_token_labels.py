@@ -3,7 +3,7 @@
 import pytest
 from pathlib import Path
 import sys
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "slop_src"))
 
 from slop.data.token_labels import (
     build_token_label_examples,

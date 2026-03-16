@@ -8,7 +8,7 @@ import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "slop_src"))
 
 import yaml
 from slop.scoring import SlopRewardModel, RewardConfig
@@ -18,7 +18,7 @@ from slop.prompt_opt import FrozenGenerator, GeneratorConfig, compare_seed_vs_op
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Compare seed vs optimized prompts on same task")
     p.add_argument("--run-dir", type=str, required=True, help="Run directory (e.g. outputs/prompt_opt/run_20250101_120000)")
-    p.add_argument("--config", type=str, default="configs/prompt_opt.yaml", help="Config for reward/generator if not in run dir")
+    p.add_argument("--config", type=str, default="slop_configs/prompt_opt.yaml", help="Config for reward/generator if not in run dir")
     p.add_argument("--n-samples", type=int, default=5)
     return p.parse_args()
 

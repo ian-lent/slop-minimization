@@ -7,7 +7,7 @@ from pathlib import Path
 import torch
 
 import sys
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "slop_src"))
 
 from slop.data.dataset import load_jsonl
 from slop.data.tokenizer import SlopTokenizer

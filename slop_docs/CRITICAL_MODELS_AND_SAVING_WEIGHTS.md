@@ -109,7 +109,7 @@ print(f"TinyLlama saved to {save_dir}")
 Later, use the cached copy so you don’t hit HuggingFace every time:
 
 ```python
-# In configs/prompt_opt.yaml set generator.model_name to the path, e.g.:
+# In slop_configs/prompt_opt.yaml set generator.model_name to the path, e.g.:
 #   model_name: outputs/generator_cache/tinyllama/saved
 # Or load in code:
 # model = AutoModelForCausalLM.from_pretrained("outputs/generator_cache/tinyllama/saved")
@@ -138,10 +138,10 @@ print(f"TinyLlama weights copied to {dst}")
 1. **Setup**: Clone repo, install deps, build data (as in notebook).
 2. **Train classifier** (curriculum only if that’s your choice):
    ```bash
-   PYTHONPATH=src python scripts/train_token_classifier.py --config configs/classifier_encoder.yaml --output-dir outputs/classifier_curriculum
+   PYTHONPATH=slop_src python slop_scripts/train_token_classifier.py --config slop_configs/classifier_encoder.yaml --output-dir outputs/classifier_curriculum
    ```
 3. **Save classifier**: Run (B) and/or (C) above.
-4. **Prompt optimization** (TinyLlama only): Use `configs/prompt_opt.yaml` with `generator.model_name: TinyLlama/TinyLlama-1.1B-Chat-v1.0` (or the local path from (D)).
+4. **Prompt optimization** (TinyLlama only): Use `slop_configs/prompt_opt.yaml` with `generator.model_name: TinyLlama/TinyLlama-1.1B-Chat-v1.0` (or the local path from (D)).
 5. **Optional**: Run (D) once to cache TinyLlama; then (E) to copy to Drive. Skip `compare_generators.py` with multiple generators.
 
 This keeps only the critical models (DistilBERT classifier + TinyLlama generator) and gives you explicit code to save and reuse their weights.

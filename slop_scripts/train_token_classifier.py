@@ -14,7 +14,7 @@ from torch.utils.data import DataLoader, WeightedRandomSampler
 from datasets import Dataset
 
 import sys
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "slop_src"))
 
 from slop.config import Config
 from slop.data.dataset import load_jsonl
@@ -30,7 +30,7 @@ from slop.metrics import (
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Train token-level slop classifier from YAML config")
-    p.add_argument("--config", type=str, default="configs/classifier_encoder.yaml")
+    p.add_argument("--config", type=str, default="slop_configs/classifier_encoder.yaml")
     p.add_argument("--output-dir", type=str, default=None, help="Override config output_dir")
     p.add_argument("--use-wandb", action="store_true", help="Override to enable wandb")
     return p.parse_args()

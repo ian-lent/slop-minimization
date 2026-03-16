@@ -42,7 +42,7 @@
 
 ## 3. Semantic Mutation Findings
 
-**Evidence:** Code inspection + simulated parent→child examples from `scripts/audit_semantic_mutations.py` (no model load). Run artifacts do **not** record which mutation type (semantic vs slot vs structural) produced each candidate.
+**Evidence:** Code inspection + simulated parent→child examples from `slop_scripts/audit_semantic_mutations.py` (no model load). Run artifacts do **not** record which mutation type (semantic vs slot vs structural) produced each candidate.
 
 ### Helpers and behavior
 
