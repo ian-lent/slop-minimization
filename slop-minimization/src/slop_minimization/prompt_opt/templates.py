@@ -6,6 +6,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
+STRUCTURE_PREFERENCE_VALUES = ("prose_preferred", "mixed", "list_friendly")
+
+
 @dataclass
 class PromptSpec:
     """Structured prompt with slots for role, task, constraints, anti-slop, etc."""
@@ -18,6 +21,8 @@ class PromptSpec:
     tone: str = ""
     audience: str = ""
     reasoning_style: str = ""
+    # Structure style: prose_preferred (default) | mixed | list_friendly
+    structure_preference: str = "prose_preferred"
 
     def copy(self) -> "PromptSpec":
         return PromptSpec(
@@ -29,6 +34,7 @@ class PromptSpec:
             tone=self.tone,
             audience=self.audience,
             reasoning_style=self.reasoning_style,
+            structure_preference=self.structure_preference,
         )
 
 
@@ -141,11 +147,15 @@ def prompt_spec_to_dict(spec: PromptSpec) -> dict[str, Any]:
         "tone": spec.tone,
         "audience": spec.audience,
         "reasoning_style": spec.reasoning_style,
+        "structure_preference": getattr(spec, "structure_preference", "prose_preferred"),
     }
 
 
 def dict_to_prompt_spec(d: dict[str, Any]) -> PromptSpec:
     """Build PromptSpec from a dict (e.g. from JSON)."""
+    pref = d.get("structure_preference", "prose_preferred")
+    if pref not in STRUCTURE_PREFERENCE_VALUES:
+        pref = "prose_preferred"
     return PromptSpec(
         role=d.get("role", ""),
         task=d.get("task", ""),
@@ -155,6 +165,7 @@ def dict_to_prompt_spec(d: dict[str, Any]) -> PromptSpec:
         tone=d.get("tone", ""),
         audience=d.get("audience", ""),
         reasoning_style=d.get("reasoning_style", ""),
+        structure_preference=pref,
     )
 
 

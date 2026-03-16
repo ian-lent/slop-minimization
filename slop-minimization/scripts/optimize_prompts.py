@@ -106,11 +106,6 @@ def main() -> None:
     print(f"\n[Best final reward: {result['best_avg_reward']:.4f}]")
 
     print("\n" + "=" * 60)
-    print("ONE EXAMPLE GENERATION FROM BEST PROMPT")
-    print("=" * 60)
-    print(result.get("example_generation", "(none)")[:600])
-
-    print("\n" + "=" * 60)
     print("EVAL: SEED VS OPTIMIZED (same task, n_samples=5)")
     print("=" * 60)
     import random
@@ -130,6 +125,26 @@ def main() -> None:
     print(f"Seed mean reward:     {seed_mean:.4f}")
     print(f"Optimized mean reward: {opt_mean:.4f}")
     print(f"Delta (optimized - seed): {delta:+.4f}")
+
+    print("\n" + "=" * 60)
+    print("ONE EXAMPLE GENERATION FROM BEST PROMPT")
+    print("=" * 60)
+    print(result.get("example_generation", "(none)")[:600])
+
+    print("\n" + "=" * 60)
+    print("STRUCTURAL DIAGNOSTICS SUMMARY FOR BEST PROMPT")
+    print("=" * 60)
+    leaderboard = result.get("leaderboard", [])
+    if leaderboard:
+        best_row = leaderboard[0]
+        struct = best_row.get("structural_diagnostics", {})
+        if struct:
+            for k, v in sorted(struct.items()):
+                print(f"  {k}: {v:.4f}")
+        else:
+            print("  (no structural diagnostics)")
+    else:
+        print("  (no leaderboard)")
 
     print("\n" + "=" * 60)
     print("SUMMARY")

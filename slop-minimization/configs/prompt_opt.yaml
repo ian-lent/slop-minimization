@@ -29,19 +29,22 @@ generator:
   eos_token_id: null
   max_prompt_length: 1024
 
-# Search (small default budget for quick validation)
+# Search (slightly more stable run: larger population, more iterations)
+# Seeds use structure_preference: prose_preferred by default.
 search:
-  population_size: 6
-  top_k: 2
+  population_size: 8
+  top_k: 3
   children_per_parent: 2
-  num_iterations: 3
+  num_iterations: 4
   samples_per_prompt: 2
   mutation_strength: medium
   random_seed: 42
   min_output_length: 20
   keep_random_explore: 1
-  # Prompt rendering: structured (sections) | simple (natural paragraph) | compact (minimal)
   render_mode: simple
+  lambda_structural: 0.15
+  structural_threshold: 0.25
+  preserve_one_unmutated_best: true
 
 # Task / topic (default seed instruction)
 default_task: "Explain inflation clearly to a college student."

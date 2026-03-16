@@ -2,7 +2,7 @@
 
 from .aggregation import aggregate_token_scores, compute_reward
 from .reward import RewardConfig, SlopRewardModel
-from .diagnostics import compute_diagnostics
+from .diagnostics import compute_diagnostics, compute_structural_diagnostics
 
 __all__ = [
     "aggregate_token_scores",
@@ -10,4 +10,5 @@ __all__ = [
     "RewardConfig",
     "SlopRewardModel",
     "compute_diagnostics",
+    "compute_structural_diagnostics",
 ]

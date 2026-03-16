@@ -11,6 +11,32 @@ from .templates import PromptSpec, render_prompt, get_seeds_for_task, prompt_spe
 from .mutations import mutate_spec
 
 
+def _structural_penalty_from_diagnostics(
+    diagnostics: list[dict],
+    threshold: float = 0.25,
+) -> tuple[float, dict[str, float]]:
+    """Compute a smooth structural penalty (0..1) from per-output diagnostics. Above threshold ramps up."""
+    if not diagnostics:
+        return 0.0, {}
+    densities = []
+    for d in diagnostics:
+        v = d.get("abnormal_punctuation_density")
+        if isinstance(v, (int, float)):
+            densities.append(float(v))
+    if not densities:
+        return 0.0, {}
+    avg_density = sum(densities) / len(densities)
+    # Penalty: 0 below threshold, then linear ramp to 1 at density=1
+    denom = 1.0 - threshold
+    penalty = max(0.0, (avg_density - threshold) / denom) if denom > 0 else (1.0 if avg_density > threshold else 0.0)
+    summary = {}
+    for key in ["bullet_like_line_ratio", "repeated_dash_ratio", "list_marker_ratio", "abnormal_punctuation_density"]:
+        vals = [d[key] for d in diagnostics if key in d and isinstance(d.get(key), (int, float))]
+        if vals:
+            summary[key] = sum(vals) / len(vals)
+    return penalty, summary
+
+
 def evaluate_prompt(
     prompt_spec: PromptSpec,
     generator: Any,
@@ -19,23 +45,24 @@ def evaluate_prompt(
     min_length: int = 20,
     rng: Any = None,
     render_mode: str = "structured",
+    lambda_structural: float = 0.0,
+    structural_threshold: float = 0.25,
 ) -> dict[str, Any]:
     """Generate n_samples from the prompt, score with reward model, return averaged metrics and diagnostics.
 
     Outputs below min_length (word count) are rejected and not scored; they are counted in invalid_count.
+    When lambda_structural > 0, a structural penalty is applied: total reward = base_reward - lambda_structural * penalty.
     """
     import random
     rng = rng or random.Random(42)
     if render_mode not in RENDER_MODES:
         render_mode = "structured"
     prompt_text = render_prompt(prompt_spec, mode=render_mode)
-    # Generate multiple times (no batching across samples to keep interface simple)
     outputs: list[str] = []
     for _ in range(n_samples):
         out = generator.generate_one(prompt_text)
         outputs.append(out)
 
-    # Anti-degenerate: reject too short
     valid_outputs = [t for t in outputs if len(t.split()) >= min_length]
     invalid_count = len(outputs) - len(valid_outputs)
 
@@ -48,28 +75,35 @@ def evaluate_prompt(
             "invalid_count": invalid_count,
             "n_samples": n_samples,
             "avg_reward": -1.0,
+            "avg_base_reward": -1.0,
+            "avg_structural_penalty": 0.0,
             "avg_doc_slop_score": 1.0,
             "diagnostics_summary": {},
+            "structural_diagnostics": {},
             "error": "all outputs below min_length",
         }
 
     reward_model.load()
     result = reward_model.score_batch(valid_outputs, return_diagnostics=True)
-    rewards = result["reward"]
+    base_rewards = result["reward"]
     doc_scores = result["doc_slop_score"]
     diagnostics = result.get("diagnostics") or []
 
-    avg_reward = sum(rewards) / len(rewards)
+    avg_base_reward = sum(base_rewards) / len(base_rewards)
     avg_doc_slop_score = sum(doc_scores) / len(doc_scores)
-    # Summarize diagnostics (e.g. mean of key fields)
     diag_summary: dict[str, float] = {}
     if diagnostics:
-        keys = ["repetition_ratio", "punctuation_ratio", "caps_ratio", "filler_loop_score"]
-        for k in keys:
+        for k in ["repetition_ratio", "punctuation_ratio", "caps_ratio", "filler_loop_score"]:
             if k in diagnostics[0]:
                 vals = [d[k] for d in diagnostics if isinstance(d.get(k), (int, float))]
                 if vals:
                     diag_summary[k] = sum(vals) / len(vals)
+
+    structural_penalty, structural_diagnostics = _structural_penalty_from_diagnostics(
+        diagnostics, threshold=structural_threshold
+    )
+    penalty_contribution = lambda_structural * structural_penalty
+    avg_reward = avg_base_reward - penalty_contribution
 
     return {
         "prompt_spec": prompt_spec_to_dict(prompt_spec),
@@ -79,8 +113,12 @@ def evaluate_prompt(
         "invalid_count": invalid_count,
         "n_samples": n_samples,
         "avg_reward": avg_reward,
+        "avg_base_reward": avg_base_reward,
+        "avg_structural_penalty": structural_penalty,
+        "structural_penalty_contribution": penalty_contribution,
         "avg_doc_slop_score": avg_doc_slop_score,
         "diagnostics_summary": diag_summary,
+        "structural_diagnostics": structural_diagnostics,
         "error": None,
     }
 
@@ -97,6 +135,10 @@ class HillClimbConfig:
     min_output_length: int = 20
     keep_random_explore: int = 1  # number of random mutants to add each iteration
     render_mode: str = "structured"  # structured | simple | compact
+    # Structural penalty: discourage punctuation-heavy / list-heavy outputs (A8 refinement)
+    lambda_structural: float = 0.15
+    structural_threshold: float = 0.25  # penalty ramps above this abnormal_punctuation_density
+    preserve_one_unmutated_best: bool = True  # keep one copy of best spec unmutated in next population
 
 
 def run_hill_climbing(
@@ -147,6 +189,9 @@ def run_hill_climbing(
                 "random_seed": config.random_seed,
                 "min_output_length": config.min_output_length,
                 "render_mode": config.render_mode,
+                "lambda_structural": getattr(config, "lambda_structural", 0.0),
+                "structural_threshold": getattr(config, "structural_threshold", 0.25),
+                "preserve_one_unmutated_best": getattr(config, "preserve_one_unmutated_best", True),
             }
             yaml.dump(cfg_dict, f, default_flow_style=False)
 
@@ -162,6 +207,8 @@ def run_hill_climbing(
                 min_length=config.min_output_length,
                 rng=rng,
                 render_mode=config.render_mode,
+                lambda_structural=getattr(config, "lambda_structural", 0.0),
+                structural_threshold=getattr(config, "structural_threshold", 0.25),
             )
             if res.get("invalid_count", 0) > 0 and res.get("outputs"):
                 for i, out in enumerate(res["outputs"]):
@@ -190,15 +237,17 @@ def run_hill_climbing(
 
         # New population: top_k specs + their mutated children + optional random explore
         population = []
-        for spec in top_specs:
-            population.append(spec.copy())
+        preserve_best = getattr(config, "preserve_one_unmutated_best", True)
+        if preserve_best and top_specs:
+            population.append(top_specs[0].copy())  # one unmutated best
+        for i, spec in enumerate(top_specs):
+            if i > 0 or not preserve_best:
+                population.append(spec.copy())
             for _ in range(config.children_per_parent - 1):
                 population.append(mutate_spec(spec.copy(), rng, config.mutation_strength))
-        # Random explorations
         for _ in range(config.keep_random_explore):
             base = rng.choice(seeds).copy()
             population.append(mutate_spec(base, rng, config.mutation_strength))
-        # Trim to population_size
         population = population[: config.population_size]
 
     # Build leaderboard from all_candidates (dedupe by prompt_text, keep best reward)
@@ -222,6 +271,10 @@ def run_hill_climbing(
                     "prompt_text": row["prompt_text"],
                     "prompt_spec": row["prompt_spec"],
                     "avg_reward": row["avg_reward"],
+                    "avg_base_reward": row.get("avg_base_reward", row["avg_reward"]),
+                    "avg_structural_penalty": row.get("avg_structural_penalty", 0.0),
+                    "structural_penalty_contribution": row.get("structural_penalty_contribution", 0.0),
+                    "structural_diagnostics": row.get("structural_diagnostics", {}),
                     "avg_doc_slop_score": row["avg_doc_slop_score"],
                     "generation_count": row.get("generation_count", 0),
                     "iteration_found": iteration_found.get(row["prompt_text"], -1),
@@ -235,6 +288,9 @@ def run_hill_climbing(
                 f.write(json.dumps({
                     "prompt_text": c["prompt_text"][:500],
                     "avg_reward": c["avg_reward"],
+                    "avg_base_reward": c.get("avg_base_reward", c["avg_reward"]),
+                    "structural_penalty_contribution": c.get("structural_penalty_contribution", 0.0),
+                    "structural_diagnostics": c.get("structural_diagnostics", {}),
                     "outputs": c.get("valid_outputs", [])[:3],
                 }) + "\n")
         if invalid_generations:
@@ -247,7 +303,9 @@ def run_hill_climbing(
             f.write(f"Iterations: {config.num_iterations}\n\n")
             f.write("## Top 5 prompts by reward\n\n")
             for i, row in enumerate(leaderboard[:5], 1):
-                f.write(f"### {i}. reward={row['avg_reward']:.4f}\n\n")
+                base = row.get("avg_base_reward", row["avg_reward"])
+                pen = row.get("structural_penalty_contribution", 0.0)
+                f.write(f"### {i}. reward={row['avg_reward']:.4f} (base={base:.4f}, structural_penalty={pen:.4f})\n\n")
                 f.write(f"```\n{row['prompt_text']}\n```\n\n")
 
     return {

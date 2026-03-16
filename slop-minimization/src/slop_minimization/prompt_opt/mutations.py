@@ -58,6 +58,14 @@ OUTPUT_FORMATS = [
     "Short paragraphs; bullets for lists.",
 ]
 
+# Prose-oriented formats (preferred when structure_preference is prose_preferred)
+PROSE_OUTPUT_FORMATS = [
+    "Plain paragraphs.",
+    "Short paragraphs; avoid bullet lists.",
+    "Write in continuous prose with short paragraphs.",
+    "Use short paragraphs only; no lists or bullets.",
+]
+
 REASONING_STYLES = [
     "State claims directly; support with concrete examples when needed.",
     "Lead with the main point; then justify.",
@@ -68,7 +76,7 @@ REASONING_STYLES = [
 
 
 def _pick_mutation_target(spec: PromptSpec, rng: "Random") -> str:
-    """Choose which slot to mutate (only non-empty or always allow task/role)."""
+    """Choose which slot to mutate. When prose_preferred, downweight output_format."""
     candidates = []
     if spec.role:
         candidates.append("role")
@@ -86,8 +94,13 @@ def _pick_mutation_target(spec: PromptSpec, rng: "Random") -> str:
         candidates.append("audience")
     if spec.reasoning_style:
         candidates.append("reasoning_style")
-    # Always allow adding to list slots or mutating core slots
     candidates.extend(["constraints", "anti_slop", "tone", "output_format", "reasoning_style"])
+    pref = getattr(spec, "structure_preference", "prose_preferred")
+    if pref == "prose_preferred" and "output_format" in candidates:
+        # Reduce chance of mutating output_format: remove 2 of its entries so it's less likely
+        for _ in range(2):
+            if "output_format" in candidates:
+                candidates.remove("output_format")
     return rng.choice(candidates)
 
 
@@ -128,7 +141,11 @@ def _mutate_tone(spec: PromptSpec, rng: "Random") -> None:
 
 
 def _mutate_output_format(spec: PromptSpec, rng: "Random") -> None:
-    spec.output_format = rng.choice(OUTPUT_FORMATS)
+    pref = getattr(spec, "structure_preference", "prose_preferred")
+    if pref == "prose_preferred" and rng.random() < 0.7:
+        spec.output_format = rng.choice(PROSE_OUTPUT_FORMATS)
+    else:
+        spec.output_format = rng.choice(OUTPUT_FORMATS)
 
 
 def _mutate_reasoning_style(spec: PromptSpec, rng: "Random") -> None:
