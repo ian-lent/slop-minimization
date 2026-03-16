@@ -42,7 +42,7 @@ def main() -> None:
     gen_cfg = cfg.get("generator", {})
     if not reward_cfg:
         root = Path(__file__).resolve().parent.parent
-        with open(root / "configs" / "prompt_opt.yaml") as f:
+        with open(root / "slop_configs" / "prompt_opt.yaml") as f:
             full = yaml.safe_load(f) or {}
             reward_cfg = full.get("reward", {})
             gen_cfg = full.get("generator", {})
