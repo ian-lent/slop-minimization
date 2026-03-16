@@ -16,11 +16,11 @@ from datasets import Dataset
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from slop_minimization.config import Config
-from slop_minimization.data.dataset import load_jsonl
-from slop_minimization.data.tokenizer import tokenize_and_align_labels
-from slop_minimization.models import create_classifier_and_tokenizer
-from slop_minimization.metrics import (
+from slop.config import Config
+from slop.data.dataset import load_jsonl
+from slop.data.tokenizer import tokenize_and_align_labels
+from slop.models import create_classifier_and_tokenizer
+from slop.metrics import (
     token_level_f1,
     token_level_auroc,
     doc_level_auroc,

@@ -63,7 +63,7 @@ class SlopRewardModel:
             config_path = str(checkpoint_path / "config.yaml")
         if not Path(config_path).exists():
             # Fallback: use default model config for distilbert + LoRA
-            from slop_minimization.config import ModelConfig
+            from slop.config import ModelConfig
             model_config = ModelConfig(
                 backbone_name="distilbert-base-uncased",
                 backbone_type="encoder",
@@ -72,13 +72,13 @@ class SlopRewardModel:
                 lora_target_modules=["q_lin", "k_lin", "v_lin"],
             )
         else:
-            from slop_minimization.config import Config
+            from slop.config import Config
             cfg = Config.from_yaml(config_path)
             model_config = cfg.model
             if getattr(model_config, "max_length", None) is None:
                 model_config.max_length = self.config.chunk_size
 
-        from slop_minimization.models import create_classifier_and_tokenizer
+        from slop.models import create_classifier_and_tokenizer
         from transformers import AutoTokenizer
 
         tokenizer = AutoTokenizer.from_pretrained(str(checkpoint_path))

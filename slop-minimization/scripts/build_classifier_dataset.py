@@ -16,8 +16,8 @@ from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from slop_minimization.data.dataset import load_jsonl
-from slop_minimization.slop_gen import RuleSloppifier
+from slop.data.dataset import load_jsonl
+from slop.slop_gen import RuleSloppifier
 
 
 # Built-in corpus of clean sentences to scale without external data

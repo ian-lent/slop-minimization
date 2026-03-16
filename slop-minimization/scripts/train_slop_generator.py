@@ -10,9 +10,9 @@ from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from slop_minimization.data.dataset import load_jsonl
-from slop_minimization.slop_gen import RuleSloppifier
-from slop_minimization.slop_gen.train_rewriter import train_rewriter
+from slop.data.dataset import load_jsonl
+from slop.slop_gen import RuleSloppifier
+from slop.slop_gen.train_rewriter import train_rewriter
 
 
 def load_good_text(paths: list[str], text_key: str = "text", label_key: str = "labels", min_len: int = 20) -> list[str]:

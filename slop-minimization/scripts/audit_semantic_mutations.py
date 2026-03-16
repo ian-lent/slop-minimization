@@ -10,8 +10,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from slop_minimization.prompt_opt.templates import PromptSpec, get_seeds_for_task, prompt_spec_to_dict
-from slop_minimization.prompt_opt.mutations import (
+from slop.prompt_opt.templates import PromptSpec, get_seeds_for_task, prompt_spec_to_dict
+from slop.prompt_opt.mutations import (
     mutate_constraints_semantically,
     mutate_anti_slop_semantically,
     mutate_output_format_semantically,

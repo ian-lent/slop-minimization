@@ -11,8 +11,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 import yaml
-from slop_minimization.scoring import SlopRewardModel, RewardConfig
-from slop_minimization.prompt_opt import FrozenGenerator, GeneratorConfig, compare_seed_vs_optimized
+from slop.scoring import SlopRewardModel, RewardConfig
+from slop.prompt_opt import FrozenGenerator, GeneratorConfig, compare_seed_vs_optimized
 
 
 def parse_args() -> argparse.Namespace:

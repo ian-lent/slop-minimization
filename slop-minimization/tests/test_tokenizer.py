@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from slop_minimization.data.tokenizer import tokenize_and_align_labels, SlopTokenizer
+from slop.data.tokenizer import tokenize_and_align_labels, SlopTokenizer
 from conftest import get_tokenizer
 
 

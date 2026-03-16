@@ -9,9 +9,9 @@ import torch
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from slop_minimization.data.dataset import load_jsonl
-from slop_minimization.data.tokenizer import SlopTokenizer
-from slop_minimization.scoring import compute_reward, aggregate_token_scores
+from slop.data.dataset import load_jsonl
+from slop.data.tokenizer import SlopTokenizer
+from slop.scoring import compute_reward, aggregate_token_scores
 
 
 def parse_args() -> argparse.Namespace:
@@ -40,7 +40,7 @@ def main() -> None:
         return
 
     try:
-        from slop_minimization.models.token_classifier import SlopTokenClassifier
+        from slop.models.token_classifier import SlopTokenClassifier
         from transformers import AutoTokenizer
 
         tokenizer = AutoTokenizer.from_pretrained(classifier_path)

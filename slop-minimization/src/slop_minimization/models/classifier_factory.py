@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 
 if TYPE_CHECKING:
-    from slop_minimization.config import ModelConfig
+    from slop.config import ModelConfig
 
 
 def _unsloth_available() -> bool:
@@ -132,7 +132,7 @@ def create_classifier_and_tokenizer(config: ModelConfig):
     """
     from transformers import AutoModel, AutoTokenizer
 
-    from slop_minimization.models.token_classifier import EncoderSlopClassifier
+    from slop.models.token_classifier import EncoderSlopClassifier
 
     backbone_name = getattr(config, "backbone_name", "distilbert-base-uncased")
     backbone_type = getattr(config, "backbone_type", "encoder")

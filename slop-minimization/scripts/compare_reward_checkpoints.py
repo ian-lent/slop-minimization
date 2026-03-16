@@ -10,8 +10,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from slop_minimization.scoring import SlopRewardModel, RewardConfig
-from slop_minimization.scoring.diagnostics import compute_diagnostics
+from slop.scoring import SlopRewardModel, RewardConfig
+from slop.scoring.diagnostics import compute_diagnostics
 
 
 # Hardcoded test suite for checkpoint comparison

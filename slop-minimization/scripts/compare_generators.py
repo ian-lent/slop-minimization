@@ -11,8 +11,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 import yaml
-from slop_minimization.scoring import SlopRewardModel, RewardConfig
-from slop_minimization.prompt_opt import (
+from slop.scoring import SlopRewardModel, RewardConfig
+from slop.prompt_opt import (
     FrozenGenerator,
     GeneratorConfig,
     compare_generators,

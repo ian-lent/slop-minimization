@@ -45,7 +45,7 @@ dev-dependencies = [
 package-mode = false
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/slop_minimization"]
+packages = ["src/slop"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

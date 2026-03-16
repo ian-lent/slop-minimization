@@ -41,7 +41,7 @@ slop-minimization/
 ├── pyproject.toml
 ├── README.md
 ├── src/
-│   └── slop_minimization/
+│   └── slop/
 │       ├── config.py          # Config dataclasses
 │       ├── scoring.py         # Reward / aggregate scores
 │       ├── data/
