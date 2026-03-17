@@ -2,6 +2,8 @@
 """Evaluate slop classifier and generator."""
 
 import argparse
+import json
+from dataclasses import fields as dc_fields
 from pathlib import Path
 
 import torch
@@ -12,6 +14,50 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "slop_src"))
 from slop.dataset_io import load_jsonl
 from slop.tokenizer_utils import SlopTokenizer
 from slop.scoring import compute_reward, aggregate_token_scores
+
+
+def _load_classifier_from_saved_config(classifier_path: Path, device: torch.device):
+    """Load encoder classifier (with optional PEFT) using model_config.json + pytorch_model.bin."""
+    from slop.config import ModelConfig
+    from slop.models import create_classifier_and_tokenizer
+    from transformers import AutoTokenizer
+
+    config_path = classifier_path / "model_config.json"
+    state_path = classifier_path / "pytorch_model.bin"
+    if not state_path.exists():
+        return None, None
+    if not config_path.exists():
+        # Backward compat: write default encoder config so old checkpoints (e.g. classifier_curriculum) load
+        default_config = {
+            "backbone_name": "distilbert-base-uncased",
+            "model_type": "encoder",
+            "num_labels": 2,
+            "dropout": 0.1,
+            "max_length": 256,
+            "use_lora": True,
+            "lora_r": 16,
+            "lora_alpha": 32,
+            "lora_dropout": 0.05,
+            "lora_target_modules": ["q_lin", "k_lin", "v_lin"],
+        }
+        config_path.write_text(json.dumps(default_config, indent=2))
+        print(f"Wrote default {config_path} for backward compatibility.")
+    raw = json.loads(config_path.read_text())
+    raw["backbone_type"] = raw.get("model_type", "encoder")
+    raw.pop("model_type", None)
+    # ModelConfig fields only
+    allowed = {f.name for f in dc_fields(ModelConfig)}
+    cfg_dict = {k: v for k, v in raw.items() if k in allowed}
+    cfg = ModelConfig(**cfg_dict)
+
+    model, _ = create_classifier_and_tokenizer(cfg)
+    state = torch.load(state_path, map_location="cpu", weights_only=True)
+    model.load_state_dict(state, strict=True)
+    model.to(device)
+    model.eval()
+
+    tokenizer = AutoTokenizer.from_pretrained(classifier_path)
+    return model, tokenizer
 
 
 def parse_args() -> argparse.Namespace:
@@ -40,15 +86,18 @@ def main() -> None:
         return
 
     try:
-        from slop.models.token_classifier import SlopTokenClassifier
         from transformers import AutoTokenizer
 
-        tokenizer = AutoTokenizer.from_pretrained(classifier_path)
-        model = SlopTokenClassifier(
-            backbone_name=str(classifier_path),
-            num_labels=2,
-        ).to(device)
-        model.eval()
+        model, tokenizer = _load_classifier_from_saved_config(classifier_path, device)
+        if model is None or tokenizer is None:
+            # Fallback: load as causal LM from path (requires config.json with model_type in checkpoint)
+            from slop.models.token_classifier import SlopTokenClassifier
+            tokenizer = AutoTokenizer.from_pretrained(classifier_path)
+            model = SlopTokenClassifier(
+                backbone_name=str(classifier_path),
+                num_labels=2,
+            ).to(device)
+            model.eval()
 
         slop_tok = SlopTokenizer(tokenizer, max_length=256)
 
@@ -86,7 +135,6 @@ def main() -> None:
         }
         print(results)
 
-        import json
         Path(args.output_path).parent.mkdir(parents=True, exist_ok=True)
         with open(args.output_path, "w") as f:
             json.dump(results, f, indent=2)

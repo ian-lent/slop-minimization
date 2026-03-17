@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import random
 from collections import Counter
 from pathlib import Path
@@ -89,6 +90,29 @@ def checksum_saved_file(path: Path) -> str:
                 break
             h.update(blk)
     return h.hexdigest()[:16]
+
+
+def _save_model_config(out_dir: Path, cfg_model) -> None:
+    """Save minimal model config for eval to load the same architecture (encoder + optional PEFT)."""
+    lora_target = getattr(cfg_model, "lora_target_modules", None)
+    if isinstance(lora_target, str):
+        lora_target = [lora_target]
+    elif lora_target is None:
+        lora_target = ["q_proj", "v_proj"]
+    config = {
+        "backbone_name": getattr(cfg_model, "backbone_name", "distilbert-base-uncased"),
+        "model_type": getattr(cfg_model, "backbone_type", "encoder"),
+        "num_labels": int(getattr(cfg_model, "num_labels", 2)),
+        "dropout": float(getattr(cfg_model, "dropout", 0.1)),
+        "max_length": int(getattr(cfg_model, "max_length", 512)),
+        "use_lora": bool(getattr(cfg_model, "use_lora", True)),
+        "lora_r": int(getattr(cfg_model, "lora_r", 16)),
+        "lora_alpha": int(getattr(cfg_model, "lora_alpha", 32)),
+        "lora_dropout": float(getattr(cfg_model, "lora_dropout", 0.05)),
+        "lora_target_modules": list(lora_target),
+    }
+    with open(out_dir / "model_config.json", "w") as f:
+        json.dump(config, f, indent=2)
 
 
 def collate_fn(batch):
@@ -323,6 +347,7 @@ def main() -> None:
                 save_path = out_dir / "pytorch_model.bin"
                 torch.save(model.state_dict(), save_path)
                 tokenizer.save_pretrained(out_dir)
+                _save_model_config(out_dir, cfg_model)
                 ckpt_checksum = checksum_saved_file(save_path)
                 state_checksum = checksum_state_dict(model.state_dict())
                 print(f"[DEBUG] saved checkpoint: file_checksum = {ckpt_checksum} state_dict_checksum = {state_checksum}")
@@ -336,6 +361,7 @@ def main() -> None:
             save_path = out_dir / "pytorch_model.bin"
             torch.save(model.state_dict(), save_path)
             tokenizer.save_pretrained(out_dir)
+            _save_model_config(out_dir, cfg_model)
             ckpt_checksum = checksum_saved_file(save_path)
             state_checksum = checksum_state_dict(model.state_dict())
             print(f"[DEBUG] saved checkpoint (no val): file_checksum = {ckpt_checksum} state_dict_checksum = {state_checksum}")
