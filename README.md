@@ -303,6 +303,9 @@ Current student projects:
 
 ## Slop pipeline (classifier + prompt optimization)
 
-This repo also contains a **slop minimization pipeline**: a token-level classifier (verifier) trained on human vs slop text, plus prompt optimization over a frozen LLM using that classifier as the reward. For the full Colab-ready cell-by-cell guide, see [slop_docs/COLAB_CELLS.md](slop_docs/COLAB_CELLS.md). For a high-level and granular project overview, see the slop README in `slop_docs/` or the project root README in the slop-minimization fork.
+This repo also contains a **slop minimization pipeline**: a token-level classifier (verifier) trained on human vs slop text, plus prompt optimization over a frozen LLM using that classifier as the reward.
+
+- **Run in Colab:** [slop_docs/COLAB_CELLS.md](slop_docs/COLAB_CELLS.md) — cell-by-cell guide.
+- **Current phase (overview, layout, next steps):** [slop_docs/CURRENT_PHASE.md](slop_docs/CURRENT_PHASE.md).
 
 
